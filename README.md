@@ -21,6 +21,9 @@ home.
   and a starting odometer are optional.
 - Tapping any row in the gas log or the service list opens it for editing, and
   that sheet is also where you delete it.
+- Already keeping this in a spreadsheet? **More > Import fill-ups** reads an
+  `.xlsx` or `.csv` and works out the columns for itself — see
+  [Importing a gas log](#importing-a-gas-log-from-a-spreadsheet).
 
 There's no PIN or login: anyone with the link can read and write. See the
 security note at the bottom.
@@ -104,6 +107,60 @@ MPG figure after it.
 **Cost per mile** and **average price per gallon** come out of the same log, so
 they show up on their own once you've logged a couple of tanks.
 
+## Importing a gas log from a spreadsheet
+
+If you've been keeping fill-ups in Excel, Numbers, or Google Sheets, you don't
+have to retype them. Open a vehicle, tap **More > Import fill-ups from a
+spreadsheet**, and pick an `.xlsx` or a `.csv`.
+
+Nothing is written until you've seen what it made of the file. The sheet that
+comes up shows how many fill-ups it found, the first few exactly as they'll be
+saved, and every row it's leaving out with the reason why — then the columns it
+matched, in case any of them need pointing somewhere else.
+
+It works out the layout for you:
+
+- **Column names don't have to match anything.** Date, Fill Date, Odometer, Odo
+  Reading, Mileage, Gallons, Litres, Total, Amount, Price/Gal, Partial?,
+  Station — all recognised, in any order. Anything it gets wrong you can change
+  with the dropdowns, and the preview updates as you do.
+- **The header doesn't have to be row 1.** Title rows and blank lines above it
+  are fine, and a workbook with several tabs opens on the one that actually
+  looks like a fuel log.
+- **Dates in any of the usual shapes** — real Excel dates, `2026-03-14`,
+  `3/14/2026`, `14/03/2026`, `March 14, 2026`. If the column is
+  day-first, one unambiguous row (anything above the 12th in front) sets the
+  whole column that way.
+- **Litres are converted to gallons**, with the box already ticked if the
+  column is named that way. Untick it if it's wrong; the gallons in the preview
+  change straight away.
+- **No total-cost column?** If the sheet records the pump price per gallon
+  instead, the cost of each stop is worked out from that.
+- **Full vs. partial tanks** come from a Full Tank or Partial column, whichever
+  the sheet has. With neither, every row is treated as a full tank — that's what
+  most logs record, and it's what MPG needs.
+
+Rows it can't use (a totals line at the bottom, a fill-up with no odometer
+reading) are listed by their real row number in the spreadsheet, so you can go
+look at row 14 and see row 14.
+
+**Importing the same file twice is safe.** A fill-up already in the log — same
+date, same odometer — is recognised and skipped rather than added again, so you
+can re-import after adding a few rows and only the new ones come across. Rows
+repeated *within* the file are caught the same way, and reported separately so
+you can tell which is which.
+
+Once the fill-ups land, MPG, cost per mile, and the rest are recalculated over
+the whole history, imported and hand-entered alike.
+
+### If the file won't open
+
+- **`.xls`** (the pre-2007 binary format) isn't readable here — open it and use
+  **File > Save As** to make an `.xlsx`, then import that.
+- Anything else that won't parse: export the sheet as **CSV** and import that
+  instead. It goes through a completely separate reader, and every feature above
+  works the same way.
+
 ## Service
 
 Tap **🔧 Add service** for either:
@@ -161,6 +218,9 @@ Then open the printed URL. Firestore reads/writes will work as soon as
 | `index.html` | The page shell — loads the stylesheet and `app.js`. |
 | `app.js` | Screens, forms, and everything that talks to Firestore. |
 | `stats.js` | The MPG and service-due math, kept free of Firestore and the DOM. |
+| `import.js` | Reading a gas log out of a spreadsheet: matching columns, checking rows, and the preview before anything is saved. |
+| `xlsx.js` | A small .xlsx reader — unzips the file and pulls values out of the sheet XML, with no library. |
+| `csv.js` | A CSV reader, for the "just export it as CSV" path. |
 | `format.js` | Formatting money, miles, gallons, and dates. |
 | `ui.js` | Modals, toasts, the QR code, and the MPG chart. |
 | `firebase-config.js` | Your Firebase project's config (you fill this in). |

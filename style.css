@@ -682,3 +682,81 @@ textarea { resize: vertical; }
   z-index: 100;
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25);
 }
+
+/* Import ------------------------------------------------------------------ */
+
+input[type="file"] {
+  padding: 8px 10px;
+  font-size: 0.9rem;
+}
+
+.import-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 16px 0 10px;
+}
+
+.import-stat {
+  font-size: 0.78rem;
+  font-weight: 700;
+  padding: 3px 9px;
+  border-radius: 999px;
+}
+
+.import-stat.ok { background: var(--green-bg); color: var(--green); }
+.import-stat.dup { background: var(--bg); color: var(--muted); }
+.import-stat.skip { background: var(--amber-bg); color: var(--amber); }
+
+/* The preview scrolls sideways on its own rather than stretching the sheet. */
+.import-preview-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.import-preview {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8rem;
+  white-space: nowrap;
+}
+
+.import-preview th {
+  text-align: left;
+  font-weight: 600;
+  color: var(--muted);
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.import-preview td {
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--border);
+  font-variant-numeric: tabular-nums;
+}
+
+.import-preview tr:last-child td { border-bottom: none; }
+
+.import-problems {
+  list-style: none;
+  padding: 0;
+  margin: 12px 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 0.8rem;
+}
+
+.import-problems li {
+  color: var(--text);
+  padding-left: 10px;
+  border-left: 2px solid var(--amber);
+}
+
+.import-problems li.muted { border-left-color: var(--border); }
+
+.muted { color: var(--muted); }

@@ -36,6 +36,7 @@ import {
   mpgChartSvg,
 } from "./ui.js";
 import { computeFuelStats, serviceStatus, compareServices } from "./stats.js";
+import { openImportModal } from "./import.js";
 
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
@@ -921,11 +922,13 @@ function openVehicleMenu(state) {
     title: state.vehicle.name,
     options: [
       { value: "edit", label: "Edit details" },
+      { value: "import", label: "Import fill-ups from a spreadsheet" },
       { value: "qr", label: "Show QR code" },
       { value: "delete", label: "Delete vehicle" },
     ],
   }).then((choice) => {
     if (choice === "edit") openEditVehicleForm(state);
+    else if (choice === "import") startImport(state);
     else if (choice === "qr") openQrModal(location.href, `Scan to open ${state.vehicle.name}`);
     else if (choice === "delete") deleteVehicle(state);
   });
@@ -986,6 +989,57 @@ async function deleteVehicle(state) {
   batch.delete(doc(db, "vehicles", state.id));
   await batch.commit();
   location.search = "";
+}
+
+// ---------------------------------------------------------------------------
+// Importing a gas log from a spreadsheet
+//
+// import.js works out what the file contains and gets it confirmed; this part
+// is only the writing, which it hands back here so that module never has to
+// know Firestore exists.
+// ---------------------------------------------------------------------------
+
+function startImport(state) {
+  openImportModal({
+    vehicleName: state.vehicle.name,
+    existingFillups: state.fillups,
+    onImport: async (entries, onProgress) => {
+      const written = await writeImportedFillups(state.id, entries, onProgress);
+      await recomputeSummary(state.id);
+      showToast(`Imported ${written} fill-up${written === 1 ? "" : "s"}`);
+    },
+  });
+}
+
+// Firestore takes at most 500 writes in a batch, so a long history goes up in
+// chunks -- with the count reported back so the button can say where it's got to.
+const IMPORT_CHUNK = 400;
+
+async function writeImportedFillups(vehicleId, entries, onProgress) {
+  const fillups = collection(db, "vehicles", vehicleId, "fillups");
+  let written = 0;
+
+  for (let start = 0; start < entries.length; start += IMPORT_CHUNK) {
+    const chunk = entries.slice(start, start + IMPORT_CHUNK);
+    const batch = writeBatch(db);
+    for (const entry of chunk) {
+      batch.set(doc(fillups), {
+        odometerMiles: entry.odometerMiles,
+        gallons: entry.gallons,
+        totalCents: entry.totalCents,
+        fullTank: entry.fullTank,
+        filledOn: entry.filledOn,
+        station: entry.station,
+        source: "import",
+        createdAt: serverTimestamp(),
+      });
+    }
+    await batch.commit();
+    written += chunk.length;
+    onProgress(written);
+  }
+
+  return written;
 }
 
 // ---------------------------------------------------------------------------
