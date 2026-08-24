@@ -36,7 +36,6 @@ import {
   mpgChartSvg,
 } from "./ui.js";
 import { computeFuelStats, serviceStatus, compareServices } from "./stats.js";
-import { openImportModal } from "./import.js";
 
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
@@ -999,7 +998,11 @@ async function deleteVehicle(state) {
 // know Firestore exists.
 // ---------------------------------------------------------------------------
 
-function startImport(state) {
+// The spreadsheet readers are a good chunk of code that most sessions never
+// touch, so they're fetched at the moment someone actually imports rather than
+// on every load of the app at a gas pump.
+async function startImport(state) {
+  const { openImportModal } = await import("./import.js");
   openImportModal({
     vehicleName: state.vehicle.name,
     existingFillups: state.fillups,
