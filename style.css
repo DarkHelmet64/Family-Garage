@@ -760,3 +760,36 @@ input[type="file"] {
 .import-problems li.muted { border-left-color: var(--border); }
 
 .muted { color: var(--muted); }
+
+/* Readings left out of the averages -------------------------------------- */
+
+/* Struck through rather than hidden: the fill-up happened, and the number it
+   produced is the evidence for why it isn't being counted. */
+.row-mpg.excluded {
+  color: var(--muted);
+  text-decoration: line-through;
+  text-decoration-thickness: 1px;
+}
+
+/* Longer than the "partial fill" tag it sits beside, so it drops the
+   all-caps treatment and reads as a sentence. */
+.row-tag.warn {
+  color: var(--amber);
+  border-color: var(--amber);
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 0.72rem;
+}
+
+.hero-note {
+  text-align: center;
+  font-size: 0.75rem;
+  color: var(--amber);
+  margin-top: 8px;
+  line-height: 1.4;
+}
+
+.mpg-bar.excluded {
+  fill: var(--muted);
+  opacity: 0.35;
+}

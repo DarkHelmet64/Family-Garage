@@ -277,7 +277,11 @@ export function mpgChartSvg(series, avgMpg) {
   const width = 320;
   const height = 96;
   const padBottom = 16;
-  const values = points.map((p) => p.mpg);
+  // A reading that isn't counted still gets a bar -- but it's kept out of the
+  // scale, since one 300 MPG typo would otherwise flatten every real bar into
+  // the baseline. Its own bar is capped at the top of the chart instead.
+  const counted = points.filter((p) => p.counted !== false);
+  const values = (counted.length ? counted : points).map((p) => p.mpg);
   // Zoom into the range that's actually in play so a 26-vs-29 MPG difference is
   // visible -- but never so far that a 1 MPG spread fills the chart and reads as
   // a collapse. The floor scales with the readings themselves, so a steady
@@ -295,9 +299,11 @@ export function mpgChartSvg(series, avgMpg) {
   const bars = points
     .map((point, i) => {
       const x = slot * i + (slot - barWidth) / 2;
-      const y = scaleY(point.mpg);
+      const excluded = point.counted === false;
+      const y = Math.max(2, scaleY(point.mpg));
       return `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${barWidth.toFixed(1)}"
-                height="${(height - padBottom - y).toFixed(1)}" rx="3" class="mpg-bar" />`;
+                height="${(height - padBottom - y).toFixed(1)}" rx="3"
+                class="mpg-bar${excluded ? " excluded" : ""}" />`;
     })
     .join("");
 
@@ -311,7 +317,7 @@ export function mpgChartSvg(series, avgMpg) {
 
   return `
     <svg class="mpg-chart" viewBox="0 0 ${width} ${height}" role="img"
-         aria-label="Recent fuel economy, ${points.map((p) => formatMpg(p.mpg)).join(", ")} MPG">
+         aria-label="Recent fuel economy, ${points.map((p) => `${formatMpg(p.mpg)}${p.counted === false ? " (not counted)" : ""}`).join(", ")} MPG">
       ${avgLine}
       ${bars}
       <text x="0" y="${height - 3}" class="mpg-axis-label">${escapeHtml(firstLabel)}</text>

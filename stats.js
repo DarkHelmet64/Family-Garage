@@ -17,6 +17,126 @@ export function sortFillupsAscending(fillups) {
   });
 }
 
+// ---------------------------------------------------------------------------
+// Outliers
+//
+// A fuel log collects two kinds of strange number, and only one of them is
+// interesting:
+//
+//   - Bad data. A fill-up that never got logged, which hands the next tank
+//     twice the miles it earned and reads as double the MPG. Or a mistyped
+//     odometer, which misses by an order of magnitude.
+//   - Real driving. Towing a trailer, a winter of school runs, a road trip.
+//     Genuinely unusual, genuinely yours, and it belongs in your numbers.
+//
+// The rule: a reading is bad data when it is at least double the 90th
+// percentile of normal readings -- double, triple, quadruple or more. That is
+// the shape of a missed fill-up, and it is out of reach of any real driving.
+//
+// Nothing is deleted or hidden. A flagged reading still appears in the log and
+// the chart, says why it wasn't counted, and can be counted anyway with one tap.
+// ---------------------------------------------------------------------------
+
+// A hair under double, and deliberately so. When a fill-up goes unlogged, the
+// next tank reports almost exactly twice the surrounding tanks -- so a strict
+// "2× or more" test sits right on top of the very case it exists to catch, and
+// whether it fires comes down to a rounding error in the last decimal. 1.9
+// clears the boundary. Triple, quadruple and beyond are caught by the same
+// test, being further out still.
+const OUTLIER_MULTIPLE = 1.9;
+const BASELINE_PERCENTILE = 0.9;
+
+// Statistics need something to be a statistic about; with four readings,
+// "unusual" doesn't mean anything yet.
+const MIN_READINGS_FOR_STATS = 5;
+
+// No car has ever done this. Unlike the rule above, this one doesn't need a
+// baseline to compare against, so it catches a mistyped gallons figure on the
+// very first tank.
+const IMPLAUSIBLY_LOW_MPG = 5;
+
+function percentile(values, p) {
+  if (!values.length) return null;
+  const sorted = [...values].sort((a, b) => a - b);
+  const position = p * (sorted.length - 1);
+  const lower = Math.floor(position);
+  const upper = Math.ceil(position);
+  if (lower === upper) return sorted[lower];
+  return sorted[lower] + (sorted[upper] - sorted[lower]) * (position - lower);
+}
+
+const median = (values) => percentile(values, 0.5);
+
+// The 90th percentile of the readings at or below the median, rather than of
+// every reading.
+//
+// Taken across the whole log, the percentile is inflated by the very readings
+// it is meant to catch -- with five ordinary tanks and one missed fill-up, the
+// missed one *is* the top of the range, and doubling it puts the bar out of
+// reach. Even in a clean log of twenty-odd readings, the 90th percentile sits
+// near the best tank a vehicle has ever managed, and a missed fill-up is double
+// the *typical* tank, not double the best one. Measuring from the bottom half
+// gives a baseline no outlier can contaminate.
+function baselineMpg(values) {
+  const mid = median(values);
+  if (mid === null) return null;
+  const normal = values.filter((v) => v <= mid);
+  return percentile(normal, BASELINE_PERCENTILE);
+}
+
+export const OUTLIER_REASONS = {
+  low: "too low to be real — check the odometer",
+  manual: "you left this one out",
+};
+
+export const outlierHighReason = (multiple) =>
+  `${multiple}× this vehicle's usual — a missed fill-up?`;
+
+// Decides which readings count, marking each entry with `counted` and, when it
+// isn't, why. Manual choices always win over the automatic ones.
+export function flagOutliers(entries) {
+  const readings = entries.filter((e) => e.mpg !== null);
+
+  // An automatic judgement is only made about readings nobody has ruled on, so
+  // one deliberately-included oddity can't drag the baseline around.
+  const automatic = readings.filter((e) => e.countTowardMpg === undefined || e.countTowardMpg === null);
+  const values = automatic.map((e) => e.mpg);
+  const baseline = values.length >= MIN_READINGS_FOR_STATS ? baselineMpg(values) : null;
+  const ceiling = baseline ? baseline * OUTLIER_MULTIPLE : null;
+
+  for (const entry of readings) {
+    if (entry.countTowardMpg === true) {
+      entry.counted = true;
+      entry.excludedReason = null;
+      continue;
+    }
+    if (entry.countTowardMpg === false) {
+      entry.counted = false;
+      entry.excludedReason = OUTLIER_REASONS.manual;
+      continue;
+    }
+
+    if (entry.mpg < IMPLAUSIBLY_LOW_MPG) {
+      entry.counted = false;
+      entry.excludedReason = OUTLIER_REASONS.low;
+      continue;
+    }
+
+    if (ceiling !== null && entry.mpg >= ceiling) {
+      entry.counted = false;
+      // Say how far out it is -- "3× this vehicle's usual" points at a missed
+      // fill-up far better than the word "outlier" does.
+      entry.excludedReason = outlierHighReason(Math.max(2, Math.round(entry.mpg / baseline)));
+      continue;
+    }
+
+    entry.counted = true;
+    entry.excludedReason = null;
+  }
+
+  return entries;
+}
+
 // MPG for one fill-up is the miles driven since the tank was last *full*,
 // divided by every gallon put in since that point (this fill-up included --
 // that fuel is what replaces what the drive burned).
@@ -50,9 +170,10 @@ export function computeFuelStats(fillups) {
       const miles = entry.odometerMiles - baseline.odometerMiles;
       if (miles > 0 && gallonsSince > 0) {
         entry.mpg = miles / gallonsSince;
-        trackedMiles += miles;
-        trackedGallons += gallonsSince;
-        trackedCostCents += costSince;
+        // Kept on the entry so that a reading dropped as an outlier takes its
+        // miles, gallons and cost out of the totals with it -- otherwise the
+        // average would still be quietly carrying the bad data.
+        entry.segment = { miles, gallons: gallonsSince, costCents: costSince };
       }
     }
     baseline = entry;
@@ -60,7 +181,15 @@ export function computeFuelStats(fillups) {
     costSince = 0;
   }
 
+  flagOutliers(entries);
+
   const withMpg = entries.filter((e) => e.mpg !== null);
+  const counted = withMpg.filter((e) => e.counted);
+  for (const entry of counted) {
+    trackedMiles += entry.segment.miles;
+    trackedGallons += entry.segment.gallons;
+    trackedCostCents += entry.segment.costCents;
+  }
   const totalGallons = entries.reduce((sum, e) => sum + e.gallons, 0);
   const totalCostCents = entries.reduce((sum, e) => sum + e.totalCents, 0);
 
@@ -72,18 +201,23 @@ export function computeFuelStats(fillups) {
       // Gallons-weighted, not an average of averages: 400 miles on 20 gallons
       // and 30 miles on 2 should read as one long run, not two equal samples.
       avgMpg: trackedGallons > 0 ? trackedMiles / trackedGallons : null,
-      lastMpg: withMpg.length ? withMpg[withMpg.length - 1].mpg : null,
-      bestMpg: withMpg.length ? Math.max(...withMpg.map((e) => e.mpg)) : null,
-      worstMpg: withMpg.length ? Math.min(...withMpg.map((e) => e.mpg)) : null,
+      lastMpg: counted.length ? counted[counted.length - 1].mpg : null,
+      bestMpg: counted.length ? Math.max(...counted.map((e) => e.mpg)) : null,
+      worstMpg: counted.length ? Math.min(...counted.map((e) => e.mpg)) : null,
+      readingCount: withMpg.length,
+      excludedCount: withMpg.length - counted.length,
       trackedMiles,
       trackedGallons,
       // Only fuel inside a measured stretch has miles to divide by, so cost per
       // mile ignores fill-ups that aren't part of one yet.
       costPerMileCents: trackedMiles > 0 ? trackedCostCents / trackedMiles : null,
       avgPriceCents: totalGallons > 0 ? totalCostCents / totalGallons : null,
+      // Totals are what was actually spent and pumped, so they count every
+      // fill-up. Only the rates above -- the ones an outlier would distort --
+      // leave anything out.
       totalGallons,
       totalCostCents,
-      mpgSeries: withMpg.map((e) => ({ on: e.filledOn, mpg: e.mpg })),
+      mpgSeries: withMpg.map((e) => ({ on: e.filledOn, mpg: e.mpg, counted: e.counted })),
     },
   };
 }

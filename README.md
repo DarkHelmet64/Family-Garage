@@ -107,6 +107,43 @@ MPG figure after it.
 **Cost per mile** and **average price per gallon** come out of the same log, so
 they show up on their own once you've logged a couple of tanks.
 
+### Readings that get left out
+
+A gas log collects two kinds of strange number, and only one of them is worth
+ignoring:
+
+- **Bad data.** Usually a fill-up that never got logged — the next tank then
+  gets credited with two tanks' worth of miles and reports roughly **double**
+  the real MPG. A mistyped odometer misses by more still.
+- **Real driving.** Towing a trailer, a winter of school runs, a mountain trip.
+  Genuinely unusual, genuinely yours, and it belongs in your numbers.
+
+So a reading is set aside when it's **at least double this vehicle's usual** —
+double, triple, quadruple, or more. That's the shape of a missed fill-up, and
+it's out of reach of any real driving, which rarely moves fuel economy by more
+than a third. A tank at 21 MPG in a van that normally does 30 stays in and
+becomes your honest "worst"; a tank at 60 does not.
+
+"Usual" is measured from the calmer half of your log, not from all of it. Taken
+across every reading, the yardstick would be inflated by the very numbers it's
+meant to catch — with five ordinary tanks and one missed fill-up, the missed
+one *is* the top of the range. It takes five readings before any of this
+applies; below that there's nothing to compare against. Separately, anything
+under 5 MPG is treated as a typo whatever the rest of the log says, since no
+car has ever done that.
+
+**Nothing is hidden or deleted.** A reading that isn't counted still sits in the
+gas log with its MPG struck through and a note saying why, and still appears on
+the chart in grey. It's left out of the average, best, worst, and cost per mile
+— the figures a bad number would distort — while **total fuel spent and total
+gallons still count every drop**, because that's money you actually spent.
+
+**You have the final say.** Tap any fill-up and there's a *Count this toward
+your averages* tick box: turn a set-aside reading back on, or drop one the app
+was happy with. Your choice sticks, and readings you've ruled on personally are
+kept out of working out what "usual" means, so one deliberate oddity can't move
+the bar for everything else.
+
 ## Importing a gas log from a spreadsheet
 
 If you've been keeping fill-ups in Excel, Numbers, or Google Sheets, you don't

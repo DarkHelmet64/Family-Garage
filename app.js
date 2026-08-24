@@ -351,6 +351,11 @@ function vehicleBodyHtml(state) {
         <span class="hero-unit">avg MPG</span>
       </div>
       <div class="hero-odo">${formatMiles(odometerMiles)} on the odometer</div>
+      ${
+        summary.excludedCount
+          ? `<div class="hero-note">${summary.excludedCount} of ${summary.readingCount} readings left out of these figures — they're marked in the gas log below</div>`
+          : ""
+      }
       ${summary.mpgSeries.length >= 2 ? mpgChartSvg(summary.mpgSeries, summary.avgMpg) : ""}
     </div>
 
@@ -466,6 +471,7 @@ function serviceHistoryRowHtml(service) {
 }
 
 function fillupRowHtml(entry) {
+  const excluded = entry.mpg !== null && entry.counted === false;
   const detail = [
     formatGallons(entry.gallons),
     entry.totalCents ? formatUSD(entry.totalCents) : null,
@@ -483,9 +489,10 @@ function fillupRowHtml(entry) {
         </span>
         <span class="row-meta">${escapeHtml(detail)}</span>
         ${entry.fullTank ? "" : `<span class="row-tag">partial fill</span>`}
+        ${excluded ? `<span class="row-tag warn">not counted · ${escapeHtml(entry.excludedReason)}</span>` : ""}
       </div>
       <div class="row-side">
-        <span class="row-mpg">${entry.mpg !== null ? `${formatMpg(entry.mpg)}<span class="stat-unit">MPG</span>` : ""}</span>
+        <span class="row-mpg ${excluded ? "excluded" : ""}">${entry.mpg !== null ? `${formatMpg(entry.mpg)}<span class="stat-unit">MPG</span>` : ""}</span>
       </div>
     </div>
   `;
@@ -549,6 +556,10 @@ function currentOdometer(vehicle, fillups, services) {
 
 async function openFillupForm(state, existing) {
   const odometerMiles = currentOdometer(state.vehicle, state.fillups, state.services);
+  // Only fill-ups that produce an MPG reading can be counted or not, so the
+  // toggle appears for those and stays out of the way otherwise.
+  const reading = existing ? computeFuelStats(state.fillups).entries.find((e) => e.id === existing.id) : null;
+  const hasReading = !!reading && reading.mpg !== null;
   const draft = existing
     ? {
         odometer: String(existing.odometerMiles ?? ""),
@@ -560,7 +571,7 @@ async function openFillupForm(state, existing) {
       }
     : { odometer: "", gallons: "", total: "", fullTank: true, filledOn: todayISO(), station: "" };
 
-  const values = await openFillupFormWith(draft, odometerMiles, !!existing);
+  const values = await openFillupFormWith(draft, odometerMiles, !!existing, hasReading ? reading : null);
   if (!values) return;
   if (values.__destructive) {
     await deleteFillup(state, existing.id);
@@ -576,6 +587,14 @@ async function openFillupForm(state, existing) {
     station: values.station || null,
   };
 
+  if (hasReading) {
+    // Store an explicit choice only where it actually overrides what the app
+    // would have decided; otherwise leave it on automatic.
+    payload.countTowardMpg = values.countMpg
+      ? (wouldAutoExclude(state, existing.id) ? true : null)
+      : false;
+  }
+
   if (existing) {
     await updateDoc(doc(db, "vehicles", state.id, "fillups", existing.id), payload);
   } else {
@@ -588,9 +607,17 @@ async function openFillupForm(state, existing) {
   showToast(existing ? "Fill-up updated" : "Fill-up logged");
 }
 
+// Asks what the outlier check would say about this reading on its own merits,
+// ignoring any choice already made about it.
+function wouldAutoExclude(state, id) {
+  const fillups = state.fillups.map((f) => (f.id === id ? { ...f, countTowardMpg: null } : f));
+  const entry = computeFuelStats(fillups).entries.find((e) => e.id === id);
+  return !!entry && entry.mpg !== null && entry.counted === false;
+}
+
 // Split out so a rejected odometer sanity-check can reopen the sheet with what
 // was already typed instead of making someone enter it all again.
-async function openFillupFormWith(draft, odometerMiles, isEdit) {
+async function openFillupFormWith(draft, odometerMiles, isEdit, reading = null) {
   const values = await openFormModal({
     title: isEdit ? "Edit fill-up" : "Log fill-up",
     fields: [
@@ -641,6 +668,19 @@ async function openFillupFormWith(draft, odometerMiles, isEdit) {
         value: draft.fullTank,
         hint: "MPG is measured between full tanks. Leave this off for a partial fill and its gallons roll into the next full one.",
       },
+      ...(reading
+        ? [
+            {
+              name: "countMpg",
+              label: `Count this ${formatMpg(reading.mpg)} MPG toward your averages`,
+              type: "checkbox",
+              value: reading.counted,
+              hint: reading.counted
+                ? "Untick to leave this reading out of the average, best and worst."
+                : `Left out: ${reading.excludedReason}. Tick to count it anyway.`,
+            },
+          ]
+        : []),
     ],
     submitLabel: isEdit ? "Save changes" : "Log fill-up",
     destructive: isEdit ? { label: "Delete this fill-up" } : null,
@@ -665,7 +705,7 @@ async function openFillupFormWith(draft, odometerMiles, isEdit) {
       confirmLabel: "Save anyway",
     });
     if (!ok) {
-      return openFillupFormWith({ ...values, fullTank: values.fullTank }, odometerMiles, isEdit);
+      return openFillupFormWith({ ...values, fullTank: values.fullTank }, odometerMiles, isEdit, reading);
     }
   }
   return values;
