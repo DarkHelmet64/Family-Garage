@@ -17,6 +17,17 @@ export function sortFillupsAscending(fillups) {
   });
 }
 
+// The garage list can't afford to read every fill-up of every vehicle just to
+// show one number, so each vehicle document carries a cached average written
+// the last time anything changed. That cache is only as current as the maths
+// that produced it -- so it's stamped with this, and a vehicle carrying an
+// older stamp gets recomputed the next time the list is opened.
+//
+// Bump it whenever a change here would give an existing log a different answer.
+//   1 - the original gallons-weighted average
+//   2 - outliers left out of the average, best and worst
+export const STATS_VERSION = 2;
+
 // ---------------------------------------------------------------------------
 // Outliers
 //

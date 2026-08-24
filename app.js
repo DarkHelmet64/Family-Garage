@@ -35,7 +35,7 @@ import {
   openQrModal,
   mpgChartSvg,
 } from "./ui.js";
-import { computeFuelStats, serviceStatus, compareServices } from "./stats.js";
+import { computeFuelStats, serviceStatus, compareServices, STATS_VERSION } from "./stats.js";
 
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
@@ -65,14 +65,20 @@ const SERVICE_SUGGESTIONS = [
   "Alignment",
 ];
 
-if (isConfigMissing()) {
-  renderConfigMissing();
-} else if (isNewVehiclePage) {
-  renderNewVehicleView();
-} else if (vehicleId) {
-  renderVehicleView(vehicleId);
-} else {
-  renderGarageView();
+// Which screen this is. Called from the very bottom of the file rather than
+// here, so that the whole module -- every const included -- is initialized
+// before a render runs. A snapshot callback that fires straight away would
+// otherwise reach state declared further down before it exists.
+function route() {
+  if (isConfigMissing()) {
+    renderConfigMissing();
+  } else if (isNewVehiclePage) {
+    renderNewVehicleView();
+  } else if (vehicleId) {
+    renderVehicleView(vehicleId);
+  } else {
+    renderGarageView();
+  }
 }
 
 function isConfigMissing() {
@@ -129,6 +135,7 @@ function renderGarageView() {
       vehicles.sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")));
 
       listEl.innerHTML = vehicles.map(vehicleCardHtml).join("");
+      refreshStaleSummaries(vehicles);
       listEl.querySelectorAll(".vehicle-row").forEach((row) => {
         row.addEventListener("click", () => {
           location.search = `?vehicle=${row.dataset.id}`;
@@ -187,6 +194,26 @@ function dueSummary(service, odometerMiles) {
     parts.push(`due at ${formatMiles(service.dueOdometerMiles)}${distance}`);
   }
   return parts.join(" · ") || "no due date set";
+}
+
+// A vehicle whose cached figures were worked out by an older version of the
+// maths is brought up to date here, once, in the background: the snapshot
+// listener above redraws the card as soon as the new numbers land. Without
+// this, the list would go on showing the old average until something else
+// happened to write to that vehicle -- and would disagree with the vehicle's
+// own page, which computes from the fill-ups every time.
+const refreshingSummaries = new Set();
+
+function refreshStaleSummaries(vehicles) {
+  for (const vehicle of vehicles) {
+    if (vehicle.statsVersion === STATS_VERSION || refreshingSummaries.has(vehicle.id)) continue;
+    refreshingSummaries.add(vehicle.id);
+    recomputeSummary(vehicle.id).catch(() => {
+      // Leave it stale rather than hammering a failing connection; the next
+      // visit tries again.
+      refreshingSummaries.delete(vehicle.id);
+    });
+  }
 }
 
 function openGarageMenu() {
@@ -1115,6 +1142,7 @@ async function recomputeSummary(id) {
     odometerMiles,
     avgMpg: summary.avgMpg,
     lastMpg: summary.lastMpg,
+    statsVersion: STATS_VERSION,
     nextService: next
       ? {
           title: next.title,
@@ -1124,3 +1152,5 @@ async function recomputeSummary(id) {
       : null,
   });
 }
+
+route();
