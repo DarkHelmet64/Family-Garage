@@ -1,0 +1,48 @@
+rules_version = '2';
+
+// Security model for this app:
+// - This is a static, serverless site (no backend), so these rules are the only
+//   real access control. They are intentionally permissive: anyone who has the
+//   link to your site can read the gas log and service records, and anyone with
+//   the link can add to them.
+// - Treat the site like an unlisted shared document -- fine for a family's own
+//   vehicles, not for anything you'd mind a stranger reading. Don't post the
+//   link publicly.
+// - The shape checks below aren't a permission system; they just stop
+//   malformed data from landing in the collections.
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    match /vehicles/{vehicleId} {
+      allow read: if true;
+      allow create, update: if request.resource.data.keys().hasAll(['name'])
+                             && request.resource.data.name is string
+                             && request.resource.data.name.size() > 0;
+      allow delete: if true;
+
+      match /fillups/{fillupId} {
+        allow read: if true;
+        allow create, update: if request.resource.data.keys().hasAll(['odometerMiles', 'gallons', 'totalCents', 'fullTank', 'filledOn'])
+                               && request.resource.data.odometerMiles is number
+                               && request.resource.data.odometerMiles >= 0
+                               && request.resource.data.gallons is number
+                               && request.resource.data.gallons > 0
+                               && request.resource.data.totalCents is int
+                               && request.resource.data.totalCents >= 0
+                               && request.resource.data.fullTank is bool
+                               && request.resource.data.filledOn is string;
+        allow delete: if true;
+      }
+
+      match /services/{serviceId} {
+        allow read: if true;
+        allow create, update: if request.resource.data.keys().hasAll(['title', 'status'])
+                               && request.resource.data.title is string
+                               && request.resource.data.title.size() > 0
+                               && request.resource.data.status in ['scheduled', 'done'];
+        allow delete: if true;
+      }
+    }
+  }
+}

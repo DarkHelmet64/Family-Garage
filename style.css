@@ -1,0 +1,684 @@
+:root {
+  --bg: #f4f6f8;
+  --card: #ffffff;
+  --text: #1c2530;
+  --muted: #6b7684;
+  --border: #e2e6ea;
+  --brand: #2f6fed;
+  --brand-dark: #1f52bd;
+  --green: #1a9c5b;
+  --green-dark: #157f4a;
+  --green-bg: #e7f7ee;
+  --amber: #a35a00;
+  --amber-bg: #fff6e6;
+  --amber-border: #f0d9a8;
+  --red: #d0393c;
+  --red-dark: #ad2c2f;
+  --red-bg: #fdeceb;
+  --red-border: #f3c9c8;
+  --fuel: #7b4bd8;
+  --fuel-dark: #6237bb;
+  --radius: 14px;
+}
+
+/* The app gets used in driveways and at pumps after dark, so it follows the
+   phone's own light/dark setting. Only the tokens change; nothing below here
+   needs to know which mode it's in. */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #12161b;
+    --card: #1b2027;
+    --text: #e9edf2;
+    --muted: #96a0ad;
+    --border: #2b323b;
+    --brand: #5b91ff;
+    --brand-dark: #4479e6;
+    --green: #35b978;
+    --green-dark: #2aa168;
+    --green-bg: #14301f;
+    --amber: #e0a247;
+    --amber-bg: #33260f;
+    --amber-border: #574220;
+    --red: #ef6a6c;
+    --red-dark: #d4595b;
+    --red-bg: #341a1b;
+    --red-border: #5a2c2d;
+    --fuel: #a480f0;
+    --fuel-dark: #8d63e6;
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+
+#app {
+  max-width: 520px;
+  margin: 0 auto;
+  padding: 20px 16px 60px;
+}
+
+h1 {
+  font-size: 1.4rem;
+  margin: 4px 0 20px;
+}
+
+h1 .emoji { margin-right: 6px; }
+
+.loading, .empty {
+  text-align: center;
+  color: var(--muted);
+  margin-top: 40px;
+}
+
+.empty.small {
+  margin: 8px 0 4px;
+  text-align: left;
+  font-size: 0.9rem;
+  line-height: 1.45;
+}
+
+.hint {
+  font-size: 0.8rem;
+  color: var(--muted);
+  margin-top: 4px;
+  line-height: 1.45;
+}
+
+.card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+  margin-bottom: 14px;
+}
+
+code {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 1px 5px;
+  font-size: 0.85em;
+}
+
+/* Buttons ---------------------------------------------------------------- */
+
+button, .btn {
+  font: inherit;
+  cursor: pointer;
+  border: none;
+  border-radius: 10px;
+  padding: 10px 14px;
+  font-weight: 600;
+  background: var(--brand);
+  color: white;
+  display: inline-block;
+  text-decoration: none;
+  box-sizing: border-box;
+}
+
+button:active, .btn:active { background: var(--brand-dark); }
+
+button.secondary {
+  background: transparent;
+  color: var(--brand);
+  border: 1px solid var(--brand);
+}
+
+button.ghost {
+  background: transparent;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  padding: 5px 10px;
+  font-weight: 500;
+  font-size: 0.8rem;
+}
+
+button.danger-solid { background: var(--red); color: white; }
+button.danger-solid:active { background: var(--red-dark); }
+
+button.approve { background: var(--green); }
+button.approve:active { background: var(--green-dark); }
+
+button.small { padding: 5px 10px; font-size: 0.8rem; }
+
+/* The delete option inside an edit sheet: reachable, but not competing with
+   Save for attention. */
+button.link-danger {
+  display: block;
+  width: 100%;
+  background: transparent;
+  color: var(--red);
+  font-weight: 500;
+  font-size: 0.85rem;
+  padding: 12px 0 2px;
+}
+button.link-danger:active { background: transparent; opacity: 0.7; }
+button:disabled { opacity: 0.5; cursor: default; }
+
+.back-link {
+  display: inline-block;
+  margin-bottom: 14px;
+  color: var(--muted);
+  text-decoration: none;
+  font-size: 0.9rem;
+}
+
+.full-action {
+  display: block;
+  width: 100%;
+  text-align: center;
+  margin-top: 22px;
+}
+
+.single-action {
+  text-align: center;
+  margin: 14px 0;
+}
+
+.section-title {
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  margin: 24px 0 8px;
+}
+
+.row-title {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.inline-link {
+  color: var(--brand);
+  text-decoration: none;
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 600;
+  font-size: 0.85rem;
+}
+
+/* Garage list ------------------------------------------------------------ */
+
+.vehicle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  cursor: pointer;
+}
+
+.vehicle-main { min-width: 0; }
+
+.vehicle-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  font-size: 1.05rem;
+}
+
+.vehicle-sub {
+  display: block;
+  font-size: 0.82rem;
+  color: var(--muted);
+  margin-top: 2px;
+}
+
+.vehicle-service {
+  display: block;
+  font-size: 0.8rem;
+  margin-top: 6px;
+  color: var(--muted);
+}
+
+.vehicle-service.overdue { color: var(--red); font-weight: 600; }
+.vehicle-service.soon { color: var(--amber); font-weight: 600; }
+
+.vehicle-stats {
+  text-align: right;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  line-height: 1.2;
+}
+
+.stat-big {
+  font-size: 1.5rem;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+.stat-label {
+  font-size: 0.72rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.stat-odo {
+  font-size: 0.8rem;
+  color: var(--muted);
+  margin-top: 6px;
+  font-variant-numeric: tabular-nums;
+}
+
+.badge {
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 2px 7px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.badge.overdue { background: var(--red-bg); color: var(--red); }
+.badge.soon { background: var(--amber-bg); color: var(--amber); }
+.badge.scheduled { background: var(--bg); color: var(--muted); }
+.badge.done { background: var(--green-bg); color: var(--green); }
+
+/* Vehicle hero ----------------------------------------------------------- */
+
+.hero { padding: 16px 16px 18px; }
+
+.hero-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.hero-name { font-size: 1.15rem; font-weight: 700; }
+.hero-sub { font-size: 0.85rem; color: var(--muted); margin-top: 2px; }
+
+.hero-figure {
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 8px;
+  margin: 14px 0 2px;
+}
+
+.hero-mpg {
+  font-size: 3rem;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+.hero-unit {
+  font-size: 0.9rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.hero-odo {
+  text-align: center;
+  font-size: 0.85rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* MPG chart -------------------------------------------------------------- */
+
+.mpg-chart {
+  width: 100%;
+  height: 96px;
+  margin-top: 14px;
+  display: block;
+  overflow: visible;
+}
+
+.mpg-bar { fill: var(--brand); opacity: 0.85; }
+
+.mpg-avg-line {
+  stroke: var(--muted);
+  stroke-width: 1;
+  stroke-dasharray: 4 4;
+  opacity: 0.7;
+}
+
+.mpg-axis-label {
+  fill: var(--muted);
+  font-size: 10px;
+  font-family: inherit;
+}
+
+/* Action row ------------------------------------------------------------- */
+
+.action-row {
+  display: flex;
+  gap: 10px;
+  margin: 4px 0 6px;
+}
+
+.action-row button { flex: 1; }
+
+.fuel-btn { background: var(--fuel); }
+.fuel-btn:active { background: var(--fuel-dark); }
+.service-btn { background: var(--brand); }
+
+/* Stat grid -------------------------------------------------------------- */
+
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.stat-cell {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 8px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.stat-value {
+  font-weight: 700;
+  font-size: 1.05rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.stat-unit {
+  font-size: 0.65rem;
+  color: var(--muted);
+  margin-left: 3px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.stat-cell .stat-label { font-size: 0.68rem; }
+
+/* Rows (services + fill-ups) --------------------------------------------- */
+
+.list { display: flex; flex-direction: column; gap: 8px; }
+
+.row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--card);
+  border: 1px solid var(--border);
+}
+
+.row-main { min-width: 0; flex: 1; }
+
+.row-title-text {
+  display: block;
+  font-weight: 600;
+  font-size: 0.95rem;
+}
+
+.row-date {
+  font-weight: 400;
+  color: var(--muted);
+  font-size: 0.8rem;
+  margin-left: 6px;
+}
+
+.row-meta {
+  display: block;
+  font-size: 0.78rem;
+  color: var(--muted);
+  margin-top: 3px;
+  line-height: 1.4;
+}
+
+.row-note {
+  display: block;
+  font-size: 0.78rem;
+  margin-top: 4px;
+  line-height: 1.4;
+}
+
+.row-tag {
+  display: inline-block;
+  margin-top: 5px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--fuel);
+  background: var(--card);
+  border: 1px solid var(--fuel);
+  border-radius: 999px;
+  padding: 1px 7px;
+}
+
+.row-side {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+/* Rows that open their own edit sheet when tapped. */
+.tappable { cursor: pointer; }
+.tappable:active { border-color: var(--brand); }
+
+.row-amount, .row-mpg {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.row-mpg { font-size: 1.05rem; }
+
+/* A colored stripe down the left edge says how urgent a service is without
+   having to read the badge. */
+.service-row.overdue {
+  box-shadow: inset 4px 0 0 var(--red);
+  border-color: var(--red-border);
+  background: var(--red-bg);
+  padding-left: 16px;
+}
+
+.service-row.soon {
+  box-shadow: inset 4px 0 0 var(--amber);
+  border-color: var(--amber-border);
+  background: var(--amber-bg);
+  padding-left: 16px;
+}
+
+.service-row.scheduled {
+  box-shadow: inset 4px 0 0 var(--border);
+  padding-left: 16px;
+}
+
+.service-row.done .row-title-text { font-weight: 500; }
+
+/* Forms ------------------------------------------------------------------ */
+
+.stacked-form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.stacked-form > button { margin-top: 12px; }
+
+.form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-top: 6px;
+}
+
+.field { grid-column: span 2; display: flex; flex-direction: column; }
+.field-half { grid-column: span 1; }
+
+label {
+  display: block;
+  font-size: 0.8rem;
+  color: var(--muted);
+  margin: 6px 0 4px;
+}
+
+input, select, textarea {
+  width: 100%;
+  font: inherit;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--card);
+  color: var(--text);
+}
+
+textarea { resize: vertical; }
+
+.field-check {
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 10px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  margin: 2px 0 0;
+  cursor: pointer;
+}
+
+.field-check input {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  margin-top: 1px;
+  accent-color: var(--brand);
+}
+
+.check-label {
+  display: block;
+  color: var(--text);
+  font-size: 0.9rem;
+  font-weight: 500;
+}
+
+.field-hint {
+  display: block;
+  font-size: 0.75rem;
+  color: var(--muted);
+  margin-top: 4px;
+  line-height: 1.4;
+}
+
+.form-error {
+  color: var(--red);
+  font-size: 0.85rem;
+  margin: 12px 0 0;
+}
+
+/* Modal ------------------------------------------------------------------ */
+
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(10, 14, 19, 0.55);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  z-index: 50;
+}
+
+.modal {
+  background: var(--card);
+  width: 100%;
+  max-width: 520px;
+  max-height: 92vh;
+  overflow-y: auto;
+  border-radius: 18px 18px 0 0;
+  padding: 20px;
+  animation: slideup 0.15s ease-out;
+}
+
+@media (min-width: 560px) {
+  .overlay { align-items: center; }
+  .modal { border-radius: var(--radius); max-height: 88vh; }
+}
+
+@keyframes slideup {
+  from { transform: translateY(20px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+.modal h2 { margin: 0 0 4px; font-size: 1.15rem; }
+
+.modal-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 18px;
+  position: sticky;
+  bottom: 0;
+  background: var(--card);
+  padding-top: 10px;
+}
+
+.modal-actions button { flex: 1; }
+
+.picker-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.picker-option { width: 100%; text-align: left; }
+
+/* QR ---------------------------------------------------------------------- */
+
+.qr-wrap { text-align: center; }
+
+.qr-wrap canvas, .qr-wrap img {
+  border-radius: 10px;
+  margin: 10px auto;
+  display: block;
+  background: white;
+}
+
+.qr-link {
+  word-break: break-all;
+  font-size: 0.85rem;
+  color: var(--muted);
+  margin-bottom: 12px;
+}
+
+.qr-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+/* Toast ------------------------------------------------------------------- */
+
+.toast {
+  position: fixed;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: #1c2530;
+  color: white;
+  padding: 10px 18px;
+  border-radius: 20px;
+  font-size: 0.9rem;
+  z-index: 100;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25);
+}

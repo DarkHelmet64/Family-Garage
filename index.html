@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+  <title>Family Garage</title>
+  <meta name="description" content="A gas log and service tracker for the family's vehicles." />
+  <meta name="color-scheme" content="light dark" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🚗</text></svg>" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div id="app">
+    <p class="loading">Loading…</p>
+  </div>
+
+  <script>
+    // Some networks/devices block one CDN but not another, so try a couple of
+    // mirrors that serve the exact same "qrcode" npm package before giving up.
+    // ui.js checks `window.QRCode` lazily (only when the QR modal is opened),
+    // so it's fine for this to still be loading when the page first appears.
+    (function () {
+      var sources = [
+        "https://unpkg.com/qrcode@1.5.3/build/qrcode.min.js",
+        "https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js",
+        "https://fastly.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js",
+      ];
+      function tryLoad(index) {
+        if (index >= sources.length) return;
+        var script = document.createElement("script");
+        script.src = sources[index];
+        script.onerror = function () {
+          tryLoad(index + 1);
+        };
+        document.head.appendChild(script);
+      }
+      tryLoad(0);
+    })();
+  </script>
+  <script type="module" src="app.js"></script>
+</body>
+</html>
