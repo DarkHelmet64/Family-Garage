@@ -5,7 +5,7 @@
 // controlled by Firestore security rules (see firestore.rules), not by keeping
 // this file secret.
 export const firebaseConfig = {
-   apiKey: "AIzaSyB8uhVMhO6Gqw8xyIj4oPw8XZBrWywncZk",
+  apiKey: "AIzaSyB8uhVMhO6Gqw8xyIj4oPw8XZBrWywncZk",
   authDomain: "vehicle-management-d4d45.firebaseapp.com",
   projectId: "vehicle-management-d4d45",
   storageBucket: "vehicle-management-d4d45.firebasestorage.app",
