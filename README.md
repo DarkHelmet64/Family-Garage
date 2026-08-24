@@ -57,7 +57,7 @@ security note at the bottom.
 2. Under "Build and deployment", set **Source** to "Deploy from a branch",
    pick `main` and folder `/ (root)`.
 3. Save. GitHub will give you a URL like
-   `https://<your-username>.github.io/family-garage/` — that's your app. The
+   `https://darkhelmet64.github.io/Family-Garage/` — that's your app. The
    first deploy takes a minute or two.
 
 ### 4. Add your vehicles
