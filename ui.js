@@ -7,6 +7,7 @@
 // ---------------------------------------------------------------------------
 
 import { formatMpg, formatISO } from "./format.js";
+import { readReceiptPhoto, PhotoError, formatBytes } from "./photos.js";
 
 export function escapeHtml(str) {
   const div = document.createElement("div");
@@ -163,9 +164,22 @@ export function openFormModal({ title, hint, fields, submitLabel = "Save", valid
 
     const errorEl = overlay.querySelector("#form-error");
 
+    // Photo fields keep their own state: which pictures are on the record now,
+    // which have been added in this sheet, and which have been taken off.
+    const photoState = new Map();
+    for (const field of fields) {
+      if (field.type !== "photos") continue;
+      photoState.set(field.name, { items: [...(field.value || [])], removedIds: [] });
+      bindPhotoField(overlay, field, photoState.get(field.name), errorEl);
+    }
+
     const readValues = () => {
       const values = {};
       for (const field of fields) {
+        if (field.type === "photos") {
+          values[field.name] = photoState.get(field.name);
+          continue;
+        }
         const input = overlay.querySelector(`[data-field="${field.name}"]`);
         if (!input) continue;
         values[field.name] = field.type === "checkbox" ? input.checked : input.value.trim();
@@ -228,6 +242,15 @@ function renderField(field) {
   const shared = `data-field="${escapeHtml(name)}" id="field-${escapeHtml(name)}"`;
   const hintHtml = hint ? `<span class="field-hint">${escapeHtml(hint)}</span>` : "";
 
+  if (type === "photos") {
+    return `
+      <div class="field" data-photo-field="${escapeHtml(name)}">
+        <label>${escapeHtml(label)}</label>
+        <div class="photo-strip" data-photo-strip="${escapeHtml(name)}"></div>
+        ${hintHtml}
+      </div>`;
+  }
+
   if (type === "checkbox") {
     return `
       <label class="field field-check" for="field-${escapeHtml(name)}">
@@ -262,6 +285,88 @@ function renderField(field) {
       ${control}
       ${hintHtml}
     </div>`;
+}
+
+// A strip of thumbnails with an Add tile on the end. Tapping a thumbnail opens
+// it full size, which is also where it can be taken off the record.
+function bindPhotoField(overlay, field, state, errorEl) {
+  const strip = overlay.querySelector(`[data-photo-strip="${field.name}"]`);
+  let busy = 0;
+
+  const render = () => {
+    const thumbs = state.items
+      .map(
+        (photo, index) => `
+        <button type="button" class="photo-thumb" data-photo-index="${index}"
+                title="${escapeHtml(formatBytes(photo.bytes || photo.dataUrl.length))}">
+          <img src="${photo.dataUrl}" alt="Receipt ${index + 1}" />
+        </button>`
+      )
+      .join("");
+
+    strip.innerHTML = `
+      ${thumbs}
+      ${busy ? `<span class="photo-busy">Adding${busy > 1 ? ` ${busy}` : ""}…</span>` : ""}
+      <label class="photo-add">
+        <input type="file" accept="image/*" multiple hidden data-photo-input />
+        <span>+ Photo</span>
+      </label>`;
+
+    strip.querySelector("[data-photo-input]").addEventListener("change", onPick);
+    strip.querySelectorAll("[data-photo-index]").forEach((button) => {
+      button.addEventListener("click", () => openPhotoViewer(state.items[Number(button.dataset.photoIndex)], {
+        onRemove: () => {
+          const [removed] = state.items.splice(Number(button.dataset.photoIndex), 1);
+          if (removed && removed.id) state.removedIds.push(removed.id);
+          render();
+        },
+      }));
+    });
+  };
+
+  async function onPick(event) {
+    const files = [...(event.target.files || [])];
+    event.target.value = "";
+    if (!files.length) return;
+
+    busy += files.length;
+    render();
+    for (const file of files) {
+      try {
+        state.items.push(await readReceiptPhoto(file));
+        errorEl.hidden = true;
+      } catch (err) {
+        // One bad file shouldn't lose the others, so say what happened and
+        // carry on with the rest.
+        errorEl.textContent = err instanceof PhotoError ? err.message : `Couldn't add that photo: ${err.message}`;
+        errorEl.hidden = false;
+      }
+      busy--;
+      render();
+    }
+  }
+
+  render();
+}
+
+export function openPhotoViewer(photo, { onRemove } = {}) {
+  const overlay = buildModal(`
+    <div class="photo-view">
+      <img src="${photo.dataUrl}" alt="Receipt" />
+    </div>
+    <div class="modal-actions">
+      ${onRemove ? `<button class="secondary" id="photo-remove">Remove</button>` : ""}
+      <button id="photo-close">Close</button>
+    </div>
+  `);
+  const close = () => overlay.remove();
+  overlay.querySelector("#photo-close").addEventListener("click", close);
+  if (onRemove) {
+    overlay.querySelector("#photo-remove").addEventListener("click", () => {
+      close();
+      onRemove();
+    });
+  }
 }
 
 // ---------------------------------------------------------------------------

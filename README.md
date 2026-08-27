@@ -252,6 +252,35 @@ Nothing here sends notifications — there's no server to send them. The app kno
 what's due whenever you open it, which is what the badge on the garage list is
 for.
 
+### Receipt photos
+
+A completed service record can carry photos of the receipt. They're added in the
+same sheet you log the work in — **+ Photo** under *Receipt photos* — so a
+receipt can go on as the service is logged rather than after saving and
+reopening it. The same sheet is where you'd add one later: tap the record, add
+the photo, save.
+
+Tap a thumbnail to see it full size, which is also where **Remove** is. A record
+with receipts shows a 📎 and a count in the service list, and deleting the record
+takes its photos with it.
+
+**Where they're stored.** Beside the record in Firestore, not in Cloud Storage.
+Cloud Storage on a newly created Firebase project generally wants a billing
+account attached, which this app is built to avoid — worth checking in your own
+console if you'd rather have full-resolution originals. Keeping them in
+Firestore means no bucket, no CORS setup, and no second set of rules.
+
+The trade is a size ceiling: a Firestore document tops out at 1 MiB, so each
+photo is resized and re-compressed in your browser until it's comfortably under
+that. A 7 MB, 2400×3200 phone photo comes out around 200 KB at 1050×1400 —
+plenty to read a receipt, and no loss that matters for black text on white
+paper. Photos are rotated the right way up on the way in, since phones record
+orientation separately from the pixels.
+
+At roughly 200 KB each, Firestore's free 1 GiB holds a few thousand receipts.
+The photos are only fetched when you open a record, so a long service history
+stays quick to scroll.
+
 ## Security note
 
 This app has no server of its own — it's static files talking directly to
@@ -283,6 +312,7 @@ Then open the printed URL. Firestore reads/writes will work as soon as
 | `app.js` | Screens, forms, and everything that talks to Firestore. |
 | `stats.js` | The MPG and service-due math, kept free of Firestore and the DOM. |
 | `import.js` | Reading fill-ups or service records out of a spreadsheet: matching columns, checking rows, and the preview before anything is saved. One flow, with a profile per record type. |
+| `photos.js` | Shrinking a photographed receipt down to something that fits beside its record. |
 | `xlsx.js` | A small .xlsx reader — unzips the file and pulls values out of the sheet XML, with no library. |
 | `csv.js` | A CSV reader, for the "just export it as CSV" path. |
 | `format.js` | Formatting money, miles, gallons, and dates. |

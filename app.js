@@ -465,6 +465,7 @@ function serviceRowHtml(service, ctx) {
         <span class="row-meta">${escapeHtml(dueSummary(service, ctx.odometerMiles))}</span>
         ${service.shop ? `<span class="row-meta">${escapeHtml(service.shop)}</span>` : ""}
         ${service.notes ? `<span class="row-note">${escapeHtml(service.notes)}</span>` : ""}
+        ${photoTagHtml(service)}
       </div>
       <div class="row-side">
         <span class="badge ${status.key}">${escapeHtml(status.label)}</span>
@@ -472,6 +473,13 @@ function serviceRowHtml(service, ctx) {
       </div>
     </div>
   `;
+}
+
+// A record with receipts says so, without the list having to load any of them.
+function photoTagHtml(service) {
+  const count = service.photoCount || 0;
+  if (!count) return "";
+  return `<span class="row-tag photo">📎 ${count} receipt${count === 1 ? "" : "s"}</span>`;
 }
 
 function serviceHistoryRowHtml(service) {
@@ -489,6 +497,7 @@ function serviceHistoryRowHtml(service) {
         <span class="row-title-text">${escapeHtml(service.title)}</span>
         <span class="row-meta">${escapeHtml(bits.join(" · "))}</span>
         ${service.notes ? `<span class="row-note">${escapeHtml(service.notes)}</span>` : ""}
+        ${photoTagHtml(service)}
       </div>
       <div class="row-side">
         ${service.costCents ? `<span class="row-amount">${formatUSD(service.costCents)}</span>` : ""}
@@ -833,6 +842,7 @@ async function openScheduleServiceForm(state, existing, odometerMiles) {
 
 async function openCompletedServiceForm(state, existing, odometerMiles, { completing = false } = {}) {
   const isEditingDone = existing && existing.status === "done";
+  const existingPhotos = existing ? await loadServicePhotos(state.id, existing.id) : [];
   const values = await openFormModal({
     title: completing ? "Mark service done" : isEditingDone ? "Edit service record" : "Log completed service",
     fields: [
@@ -885,6 +895,13 @@ async function openCompletedServiceForm(state, existing, odometerMiles, { comple
         placeholder: "Dave's Auto",
       },
       { name: "notes", label: "Notes (optional)", type: "textarea", value: existing?.notes || "" },
+      {
+        name: "photos",
+        label: "Receipt photos (optional)",
+        type: "photos",
+        value: existingPhotos,
+        hint: "Photographed receipts are shrunk to fit before they're saved — enough to read, not enough to fill up your database.",
+      },
       {
         name: "repeatMiles",
         label: "Do it again in (mi)",
@@ -940,11 +957,17 @@ async function openCompletedServiceForm(state, existing, odometerMiles, { comple
   };
 
   const services = collection(db, "vehicles", state.id, "services");
+  let serviceId;
   if (existing) {
+    serviceId = existing.id;
     await updateDoc(doc(db, "vehicles", state.id, "services", existing.id), payload);
   } else {
-    await addDoc(services, { ...payload, createdAt: serverTimestamp() });
+    // Photos picked while filling the sheet in are written once the record they
+    // belong to exists, so a receipt can be attached as the service is logged
+    // rather than after saving and reopening it.
+    serviceId = (await addDoc(services, { ...payload, createdAt: serverTimestamp() })).id;
   }
+  await saveServicePhotos(state.id, serviceId, values.photos);
 
   // A repeat interval schedules the next one straight away, which is the whole
   // point of recording "every 5,000 miles" -- otherwise it lives in your head.
@@ -979,6 +1002,7 @@ async function deleteService(state, id) {
     danger: true,
   });
   if (!ok) return;
+  await deleteServicePhotos(state.id, id);
   await deleteDoc(doc(db, "vehicles", state.id, "services", id));
   await recomputeSummary(state.id);
 }
@@ -1045,9 +1069,15 @@ async function deleteVehicle(state) {
   });
   if (!ok) return;
 
-  // Deleting a document doesn't touch what's underneath it, so the fill-ups and
-  // service records have to go explicitly or they'd linger as orphans.
+  // Deleting a document doesn't touch what's underneath it, so the fill-ups,
+  // service records and any receipts under those have to go explicitly or
+  // they'd linger as orphans.
   const batch = writeBatch(db);
+  const serviceSnap = await getDocs(collection(db, "vehicles", state.id, "services"));
+  for (const service of serviceSnap.docs) {
+    const photoSnap = await getDocs(collection(db, "vehicles", state.id, "services", service.id, "photos"));
+    photoSnap.forEach((photo) => batch.delete(photo.ref));
+  }
   for (const sub of ["fillups", "services"]) {
     const snap = await getDocs(collection(db, "vehicles", state.id, sub));
     snap.forEach((docSnap) => batch.delete(docSnap.ref));
@@ -1055,6 +1085,53 @@ async function deleteVehicle(state) {
   batch.delete(doc(db, "vehicles", state.id));
   await batch.commit();
   location.search = "";
+}
+
+// ---------------------------------------------------------------------------
+// Receipt photos
+//
+// One document per photo in a subcollection under the service record, so the
+// service list stays light: it reads the records themselves, and the pictures
+// are only fetched when a record is opened. The count is kept on the record so
+// the list can show a paperclip without reading any of them.
+// ---------------------------------------------------------------------------
+
+async function loadServicePhotos(vehicleId, serviceId) {
+  const snap = await getDocs(collection(db, "vehicles", vehicleId, "services", serviceId, "photos"));
+  return snap.docs
+    .map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }))
+    .sort((a, b) => String(a.addedOn || "").localeCompare(String(b.addedOn || "")));
+}
+
+// Deleting a document leaves whatever is underneath it, so the photos have to
+// go explicitly or they'd linger unreachable.
+async function deleteServicePhotos(vehicleId, serviceId) {
+  const snap = await getDocs(collection(db, "vehicles", vehicleId, "services", serviceId, "photos"));
+  await Promise.all(snap.docs.map((docSnap) => deleteDoc(docSnap.ref)));
+}
+
+async function saveServicePhotos(vehicleId, serviceId, photos) {
+  if (!photos) return;
+  const { items = [], removedIds = [] } = photos;
+  const photosRef = collection(db, "vehicles", vehicleId, "services", serviceId, "photos");
+
+  for (const id of removedIds) {
+    await deleteDoc(doc(db, "vehicles", vehicleId, "services", serviceId, "photos", id));
+  }
+  for (const photo of items) {
+    if (photo.id) continue; // already stored
+    await addDoc(photosRef, {
+      dataUrl: photo.dataUrl,
+      width: photo.width,
+      height: photo.height,
+      bytes: photo.bytes,
+      addedOn: new Date().toISOString(),
+      createdAt: serverTimestamp(),
+    });
+  }
+
+  // Kept on the record itself so the list can show the paperclip cheaply.
+  await updateDoc(doc(db, "vehicles", vehicleId, "services", serviceId), { photoCount: items.length });
 }
 
 // ---------------------------------------------------------------------------

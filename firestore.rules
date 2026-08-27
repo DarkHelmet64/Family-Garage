@@ -42,6 +42,20 @@ service cloud.firestore {
                                && request.resource.data.title.size() > 0
                                && request.resource.data.status in ['scheduled', 'done'];
         allow delete: if true;
+
+        // Receipt photos, one per document, stored as a shrunk-down JPEG data
+        // URL. The size check is a backstop against something oversized being
+        // written straight to the database: the app already resizes every photo
+        // to well under this, and Firestore refuses any document over 1 MiB.
+        match /photos/{photoId} {
+          allow read: if true;
+          allow create: if request.resource.data.keys().hasAll(['dataUrl'])
+                         && request.resource.data.dataUrl is string
+                         && request.resource.data.dataUrl.size() < 900000
+                         && request.resource.data.dataUrl.matches('data:image/.*');
+          allow update: if false;
+          allow delete: if true;
+        }
       }
     }
   }
