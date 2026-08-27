@@ -43,6 +43,8 @@ import {
   itemsTotalCents,
   totalServiceCostCents,
   visitTitle,
+  looksDerived,
+  undoDerivedTitle,
   scheduleRows,
   STATS_VERSION,
 } from "./stats.js";
@@ -361,6 +363,7 @@ function renderVehicleView(id) {
 
   onSnapshot(collection(db, "vehicles", id, "services"), (snap) => {
     state.services = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    repairDerivedTitles(id, state.services);
     render();
   });
 
@@ -581,6 +584,25 @@ async function knownShops(state) {
   }
   shopsElsewhere.forEach(add);
   return out;
+}
+
+// Records saved while a visit was named after its first job plus a count get
+// that count taken off, once, the next time the vehicle is opened. The history
+// worked it out at render time either way, but the stored name is what a
+// scheduled follow-up, the garage badge and the suggestions list all show.
+const repairedTitles = new Set();
+
+function repairDerivedTitles(vehicleId, services) {
+  for (const service of services) {
+    if (!looksDerived(service.title) || repairedTitles.has(service.id)) continue;
+    repairedTitles.add(service.id);
+    updateDoc(doc(db, "vehicles", vehicleId, "services", service.id), {
+      title: undoDerivedTitle(service.title),
+    }).catch((err) => {
+      repairedTitles.delete(service.id);
+      console.warn("Couldn't tidy up a visit's name", err);
+    });
+  }
 }
 
 // A record with receipts says so, without the list having to load any of them.

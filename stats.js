@@ -256,14 +256,24 @@ export function totalServiceCostCents(services) {
     .reduce((sum, record) => sum + (itemsTotalCents(serviceItems(record)) || 0), 0);
 }
 
-// What the lists call the visit: the job itself when there was only one, and
-// otherwise the first job with a count of the rest.
+// What a visit is called. Just the first job -- not "Oil change + 2 more".
+//
+// That count read well in a list and badly everywhere else it ended up: on a
+// follow-up scheduled by a repeat interval, on the garage badge, and in the
+// dropdown of previously used service names, where "+ 2 more" is not something
+// anyone means to type. The history doesn't need it either, since a visit
+// covering several jobs is headed by its date and shop and lists them
+// underneath.
 export function visitTitle(items) {
   const named = items.filter((item) => item.title);
-  if (!named.length) return "Service";
-  if (named.length === 1) return named[0].title;
-  return `${named[0].title} + ${named.length - 1} more`;
+  return named.length ? named[0].title : "Service";
 }
+
+// Titles saved while visits were named "Oil change + 2 more".
+const DERIVED_TITLE = / \+ \d+ more$/;
+
+export const looksDerived = (title) => DERIVED_TITLE.test(String(title || ""));
+export const undoDerivedTitle = (title) => String(title || "").replace(DERIVED_TITLE, "");
 
 // How close a scheduled service is, by whichever of its two triggers is nearer.
 // "soon" is 30 days or 500 miles out -- close enough to book an appointment.

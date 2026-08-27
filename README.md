@@ -282,11 +282,15 @@ up the receipt by hand, and no invented number to reconcile against it later.
 
 In the history a single-job visit reads exactly as it always has: the job's
 name, then when and where. A visit covering several is headed by when and where
-instead — with the jobs listed underneath, a name like "Oil change + 2 more"
-would only repeat the first line of the list — and shows the total on the right:
+instead — with the jobs listed underneath, repeating the first one as a heading
+adds nothing — and shows the total on the right:
 
 > **Aug 27, 2026 · 50,120 mi · Dave's Auto** — **$412.35**
 > · Oil change $79.95 · Air filter $42.40 · Brake pads $290.00
+
+A visit is named after its first job. That name is what a follow-up scheduled by
+a repeat interval carries, what the garage badge shows, and what the description
+dropdown offers, so it stays a real service name rather than a summary.
 
 Records entered before this, and ones brought in by the spreadsheet importer
 (one row is one job), are read as a visit with a single line, so nothing needed
