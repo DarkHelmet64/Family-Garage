@@ -41,6 +41,7 @@ import {
   compareServices,
   serviceItems,
   itemsTotalCents,
+  totalServiceCostCents,
   visitTitle,
   looksDerived,
   undoDerivedTitle,
@@ -419,7 +420,7 @@ function vehicleBodyHtml(state) {
       <button class="service-btn" data-act="log-service">🔧 Add service</button>
     </div>
 
-    ${statsGridHtml(summary)}
+    ${statsGridHtml(summary, totalServiceCostCents(state.services))}
 
     <div class="section-title">Service</div>
     ${
@@ -454,8 +455,14 @@ function vehicleBodyHtml(state) {
   `;
 }
 
-function statsGridHtml(summary) {
+function statsGridHtml(summary, serviceCostCents) {
   if (!summary.count) return "";
+  // Cost per mile including the shop, not just the pump -- same tracked
+  // miles as the fuel-only figure above it, so the two are comparable.
+  const costPerMileWithServiceCents =
+    summary.trackedMiles > 0 ? (summary.trackedCostCents + serviceCostCents) / summary.trackedMiles : null;
+  const totalCostCents = summary.totalCostCents + serviceCostCents;
+
   const cells = [
     { label: "Last fill-up", value: formatMpg(summary.lastMpg), unit: "MPG" },
     { label: "Best", value: formatMpg(summary.bestMpg), unit: "MPG" },
@@ -463,9 +470,22 @@ function statsGridHtml(summary) {
     {
       label: "Cost per mile",
       value: summary.costPerMileCents !== null ? `${(summary.costPerMileCents).toFixed(1)}¢` : "—",
+      sub:
+        costPerMileWithServiceCents !== null
+          ? `${costPerMileWithServiceCents.toFixed(1)}¢ w/ service`
+          : null,
     },
-    { label: "Avg price", value: formatPricePerGallon(summary.avgPriceCents), unit: "/gal" },
-    { label: "Fuel total", value: formatUSD(summary.totalCostCents) },
+    {
+      label: "Avg price",
+      value: formatPricePerGallon(summary.avgPriceCents),
+      unit: "/gal",
+      sub: `${formatUSD(serviceCostCents)} service total`,
+    },
+    {
+      label: "Fuel total",
+      value: formatUSD(summary.totalCostCents),
+      sub: `${formatUSD(totalCostCents)} w/ service`,
+    },
   ];
   return `
     <div class="stat-grid">
@@ -475,6 +495,7 @@ function statsGridHtml(summary) {
         <div class="stat-cell">
           <span class="stat-value">${escapeHtml(cell.value)}${cell.unit ? `<span class="stat-unit">${escapeHtml(cell.unit)}</span>` : ""}</span>
           <span class="stat-label">${escapeHtml(cell.label)}</span>
+          ${cell.sub ? `<span class="stat-sub">${escapeHtml(cell.sub)}</span>` : ""}
         </div>`
         )
         .join("")}

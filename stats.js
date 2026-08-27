@@ -219,6 +219,7 @@ export function computeFuelStats(fillups) {
       excludedCount: withMpg.length - counted.length,
       trackedMiles,
       trackedGallons,
+      trackedCostCents,
       // Only fuel inside a measured stretch has miles to divide by, so cost per
       // mile ignores fill-ups that aren't part of one yet.
       costPerMileCents: trackedMiles > 0 ? trackedCostCents / trackedMiles : null,
@@ -245,6 +246,14 @@ export function serviceItems(record) {
 export function itemsTotalCents(items) {
   const total = items.reduce((sum, item) => sum + (item.costCents || 0), 0);
   return total || null;
+}
+
+// Every dollar spent at the shop, across every completed visit -- the fuel
+// log's totals have a counterpart here so the two can be added together.
+export function totalServiceCostCents(services) {
+  return services
+    .filter((record) => record.status === "done")
+    .reduce((sum, record) => sum + (itemsTotalCents(serviceItems(record)) || 0), 0);
 }
 
 // What a visit is called. Just the first job -- not "Oil change + 2 more".
