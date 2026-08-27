@@ -333,7 +333,8 @@ function renderVehicleView(id) {
 
   bodyEl.addEventListener("click", (event) => {
     const target = event.target.closest("[data-act]");
-    if (target) handleVehicleAction(target.dataset.act, target.dataset.id, state);
+    if (!target) return;
+    Promise.resolve(handleVehicleAction(target.dataset.act, target.dataset.id, state)).catch(reportActionFailure);
   });
 
   const render = () => {
@@ -571,45 +572,57 @@ function fillupRowHtml(entry) {
 // Actions
 // ---------------------------------------------------------------------------
 
+// Every case returns its promise so the caller can catch. Without that, a
+// rejected action is an unhandled rejection: the tap does nothing, no message,
+// nothing in the interface to explain it.
 function handleVehicleAction(action, id, state) {
   const { vehicle } = state;
-  if (!vehicle) return;
+  if (!vehicle) return null;
   const odometerMiles = currentOdometer(vehicle, state.fillups, state.services);
 
   switch (action) {
     case "log-fuel":
-      openFillupForm(state, null);
-      break;
+      return openFillupForm(state, null);
     case "edit-fillup":
-      openFillupForm(state, state.fillups.find((f) => f.id === id) || null);
-      break;
+      return openFillupForm(state, state.fillups.find((f) => f.id === id) || null);
     case "log-service":
-      openAddServiceMenu(state, odometerMiles);
-      break;
+      return openAddServiceMenu(state, odometerMiles);
     case "edit-service": {
       const service = state.services.find((s) => s.id === id);
-      if (!service) return;
-      if (service.status === "done") openCompletedServiceForm(state, service, odometerMiles);
-      else openScheduleServiceForm(state, service, odometerMiles);
-      break;
+      if (!service) return null;
+      return service.status === "done"
+        ? openCompletedServiceForm(state, service, odometerMiles)
+        : openScheduleServiceForm(state, service, odometerMiles);
     }
     case "complete-service":
-      openCompletedServiceForm(state, state.services.find((s) => s.id === id) || null, odometerMiles, {
+      return openCompletedServiceForm(state, state.services.find((s) => s.id === id) || null, odometerMiles, {
         completing: true,
       });
-      break;
     case "vehicle-menu":
-      openVehicleMenu(state);
-      break;
+      return openVehicleMenu(state);
     case "toggle-fillups":
       state.showAllFillups = !state.showAllFillups;
       document.getElementById("vehicle-body").innerHTML = vehicleBodyHtml(state);
-      break;
+      return null;
     case "toggle-history":
       state.showHistory = !state.showHistory;
       document.getElementById("vehicle-body").innerHTML = vehicleBodyHtml(state);
-      break;
+      return null;
+    default:
+      return null;
   }
+}
+
+// What to say when an action fails. A refusal from the database is worth
+// naming, because it has a specific cause and a specific fix.
+function reportActionFailure(err) {
+  console.error(err);
+  const denied = err && (err.code === "permission-denied" || /insufficient permissions/i.test(err.message || ""));
+  return openAlertModal(
+    denied
+      ? "The database refused that. Publish firestore.rules from this repo in your Firebase console, then try again."
+      : `Something went wrong: ${err && err.message ? err.message : err}`
+  );
 }
 
 // The odometer is whatever the highest reading anywhere is: the number entered
@@ -875,7 +888,9 @@ async function openScheduleServiceForm(state, existing, odometerMiles) {
 
 async function openCompletedServiceForm(state, existing, odometerMiles, { completing = false } = {}) {
   const isEditingDone = existing && existing.status === "done";
-  const existingPhotos = existing ? await loadServicePhotos(state.id, existing.id) : [];
+  const { photos: existingPhotos, error: photoError } = existing
+    ? await loadServicePhotos(state.id, existing.id)
+    : { photos: [], error: null };
   const values = await openFormModal({
     title: completing ? "Mark service done" : isEditingDone ? "Edit service record" : "Log completed service",
     fields: [
@@ -921,7 +936,9 @@ async function openCompletedServiceForm(state, existing, odometerMiles, { comple
         label: "Receipt photos (optional)",
         type: "photos",
         value: existingPhotos,
-        hint: "Photographed receipts are shrunk to fit before they're saved — enough to read, not enough to fill up your database.",
+        hint: photoError
+          ? "Receipts couldn't be loaded — publish firestore.rules from the repo in your Firebase console. Everything else here still saves."
+          : "Photographed receipts are shrunk to fit before they're saved — enough to read, not enough to fill up your database.",
       },
       {
         name: "repeatMiles",
@@ -997,7 +1014,14 @@ async function openCompletedServiceForm(state, existing, odometerMiles, { comple
     // rather than after saving and reopening it.
     serviceId = (await addDoc(services, { ...payload, createdAt: serverTimestamp() })).id;
   }
-  await saveServicePhotos(state.id, serviceId, values.photos);
+  const photoSaveError = await saveServicePhotos(state.id, serviceId, values.photos, {
+    hadCount: existingPhotos.length,
+  });
+  if (photoSaveError) {
+    await openAlertModal(
+      "The service record saved, but the receipt photos didn't. Publish firestore.rules from the repo in your Firebase console and try adding them again."
+    );
+  }
 
   // A repeat interval schedules the next one straight away, which is the whole
   // point of recording "every 5,000 miles" -- otherwise it lives in your head.
@@ -1107,8 +1131,12 @@ async function deleteVehicle(state) {
   const batch = writeBatch(db);
   const serviceSnap = await getDocs(collection(db, "vehicles", state.id, "services"));
   for (const service of serviceSnap.docs) {
-    const photoSnap = await getDocs(collection(db, "vehicles", state.id, "services", service.id, "photos"));
-    photoSnap.forEach((photo) => batch.delete(photo.ref));
+    try {
+      const photoSnap = await getDocs(collection(db, "vehicles", state.id, "services", service.id, "photos"));
+      photoSnap.forEach((photo) => batch.delete(photo.ref));
+    } catch (err) {
+      console.warn("Couldn't list receipt photos while deleting", err);
+    }
   }
   for (const sub of ["fillups", "services", "schedule"]) {
     const snap = await getDocs(collection(db, "vehicles", state.id, sub));
@@ -1144,7 +1172,8 @@ function renderScheduleView(id) {
 
   bodyEl.addEventListener("click", (event) => {
     const target = event.target.closest("[data-act]");
-    if (target) handleScheduleAction(target.dataset.act, target.dataset.id, state);
+    if (!target) return;
+    Promise.resolve(handleScheduleAction(target.dataset.act, target.dataset.id, state)).catch(reportActionFailure);
   });
 
   const render = () => {
@@ -1236,17 +1265,16 @@ function scheduleRowHtml(row, odometerMiles) {
 }
 
 function handleScheduleAction(action, id, state) {
-  if (!state.vehicle) return;
+  if (!state.vehicle) return null;
   switch (action) {
     case "add-plan":
-      openPlanForm(state, null);
-      break;
+      return openPlanForm(state, null);
     case "edit-plan":
-      openPlanForm(state, state.schedule.find((entry) => entry.id === id) || null);
-      break;
+      return openPlanForm(state, state.schedule.find((entry) => entry.id === id) || null);
     case "book-plan":
-      bookPlanEntry(state, id);
-      break;
+      return bookPlanEntry(state, id);
+    default:
+      return null;
   }
 }
 
@@ -1362,42 +1390,71 @@ async function bookPlanEntry(state, id) {
 // the list can show a paperclip without reading any of them.
 // ---------------------------------------------------------------------------
 
+// Receipts are an extra on the record, not a precondition for opening it. If
+// they can't be read -- most likely because firestore.rules hasn't been
+// published since photos were added, so the subcollection is denied by default
+// -- the sheet still opens with everything else editable and says why the
+// pictures are missing.
 async function loadServicePhotos(vehicleId, serviceId) {
-  const snap = await getDocs(collection(db, "vehicles", vehicleId, "services", serviceId, "photos"));
-  return snap.docs
-    .map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }))
-    .sort((a, b) => String(a.addedOn || "").localeCompare(String(b.addedOn || "")));
+  try {
+    const snap = await getDocs(collection(db, "vehicles", vehicleId, "services", serviceId, "photos"));
+    return {
+      photos: snap.docs
+        .map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }))
+        .sort((a, b) => String(a.addedOn || "").localeCompare(String(b.addedOn || ""))),
+      error: null,
+    };
+  } catch (err) {
+    console.warn("Couldn't load receipt photos", err);
+    return { photos: [], error: err };
+  }
 }
 
 // Deleting a document leaves whatever is underneath it, so the photos have to
 // go explicitly or they'd linger unreachable.
 async function deleteServicePhotos(vehicleId, serviceId) {
-  const snap = await getDocs(collection(db, "vehicles", vehicleId, "services", serviceId, "photos"));
-  await Promise.all(snap.docs.map((docSnap) => deleteDoc(docSnap.ref)));
+  try {
+    const snap = await getDocs(collection(db, "vehicles", vehicleId, "services", serviceId, "photos"));
+    await Promise.all(snap.docs.map((docSnap) => deleteDoc(docSnap.ref)));
+  } catch (err) {
+    // Better to leave a picture behind than to refuse to delete the record.
+    console.warn("Couldn't clear receipt photos", err);
+  }
 }
 
-async function saveServicePhotos(vehicleId, serviceId, photos) {
-  if (!photos) return;
+async function saveServicePhotos(vehicleId, serviceId, photos, { hadCount = 0 } = {}) {
+  if (!photos) return null;
   const { items = [], removedIds = [] } = photos;
+  const added = items.filter((photo) => !photo.id);
+
+  // Nothing to do is the common case when someone edits a record's costs, so
+  // don't write -- and don't risk failing -- for no reason.
+  if (!added.length && !removedIds.length && items.length === hadCount) return null;
+
   const photosRef = collection(db, "vehicles", vehicleId, "services", serviceId, "photos");
-
-  for (const id of removedIds) {
-    await deleteDoc(doc(db, "vehicles", vehicleId, "services", serviceId, "photos", id));
+  try {
+    for (const id of removedIds) {
+      await deleteDoc(doc(db, "vehicles", vehicleId, "services", serviceId, "photos", id));
+    }
+    for (const photo of added) {
+      await addDoc(photosRef, {
+        dataUrl: photo.dataUrl,
+        width: photo.width,
+        height: photo.height,
+        bytes: photo.bytes,
+        addedOn: new Date().toISOString(),
+        createdAt: serverTimestamp(),
+      });
+    }
+    // Kept on the record itself so the list can show the paperclip cheaply.
+    await updateDoc(doc(db, "vehicles", vehicleId, "services", serviceId), { photoCount: items.length });
+    return null;
+  } catch (err) {
+    // The record itself is already saved by this point; say what didn't make it
+    // rather than pretending the whole edit failed.
+    console.warn("Couldn't save receipt photos", err);
+    return err;
   }
-  for (const photo of items) {
-    if (photo.id) continue; // already stored
-    await addDoc(photosRef, {
-      dataUrl: photo.dataUrl,
-      width: photo.width,
-      height: photo.height,
-      bytes: photo.bytes,
-      addedOn: new Date().toISOString(),
-      createdAt: serverTimestamp(),
-    });
-  }
-
-  // Kept on the record itself so the list can show the paperclip cheaply.
-  await updateDoc(doc(db, "vehicles", vehicleId, "services", serviceId), { photoCount: items.length });
 }
 
 // ---------------------------------------------------------------------------

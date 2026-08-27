@@ -347,6 +347,19 @@ At roughly 200 KB each, Firestore's free 1 GiB holds a few thousand receipts.
 The photos are only fetched when you open a record, so a long service history
 stays quick to scroll.
 
+## If something won't save
+
+Almost every "nothing happens when I tap it" in an app like this is the database
+refusing a read or a write, and the usual cause is `firestore.rules` in this repo
+being newer than the rules published in your Firebase console. Firestore denies
+anything a published rule doesn't explicitly allow, including whole
+subcollections it has never heard of.
+
+So: **when you pull changes that touch `firestore.rules`, paste the new file
+into Firebase console > Firestore Database > Rules and Publish.** The app says
+as much when it hits a refusal — the record still opens and still saves what it
+can, and it names the fix rather than failing quietly.
+
 ## Security note
 
 This app has no server of its own — it's static files talking directly to
