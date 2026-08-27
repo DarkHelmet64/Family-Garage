@@ -1003,3 +1003,11 @@ input[type="file"] {
   background: var(--bg);
   color: var(--brand);
 }
+
+/* A multi-job visit is headed by when and where, not by an invented name. */
+.row-title-text.visit-heading {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.row-title-text.visit-heading + .item-breakdown { margin-top: 8px; }

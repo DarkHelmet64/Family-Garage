@@ -230,7 +230,14 @@ export function openFormModal({ title, hint, fields, submitLabel = "Save", valid
     });
 
     const first = overlay.querySelector("[data-field]");
-    if (first && first.type !== "checkbox") first.focus();
+    if (first && first.type !== "checkbox") {
+      // Focus the first field without its suggestions springing open: a sheet
+      // that opens with a dropdown already covering it hides the form before
+      // anyone has asked for help.
+      first.dataset.suggestSilent = "1";
+      first.focus();
+      delete first.dataset.suggestSilent;
+    }
   });
 }
 
@@ -319,6 +326,23 @@ function renderField(field) {
 // behaves the same everywhere.
 const SUGGEST_LIMIT = 8;
 
+// Panels live on <body>, so they outlive the field they belong to unless
+// something clears them up: close a sheet with its dropdown open and the input
+// goes while the panel stays, stranded over the page. Watching body's children
+// catches the sheet being removed straight away, rather than waiting for a tap
+// that the stranded panel would swallow anyway.
+const suggestPanels = new Set();
+
+function sweepSuggestPanels() {
+  for (const entry of [...suggestPanels]) {
+    if (!entry.input.isConnected) entry.destroy();
+  }
+}
+
+if (typeof MutationObserver !== "undefined" && typeof document !== "undefined" && document.body) {
+  new MutationObserver(sweepSuggestPanels).observe(document.body, { childList: true });
+}
+
 export function attachSuggest(input, suggestions) {
   if (!suggestions || !suggestions.length || input.dataset.suggestBound) return;
   input.dataset.suggestBound = "1";
@@ -341,15 +365,26 @@ export function attachSuggest(input, suggestions) {
     const rect = input.getBoundingClientRect();
     panel.style.left = `${Math.round(rect.left)}px`;
     panel.style.width = `${Math.round(rect.width)}px`;
-    // Below by default, above when the field is near the bottom of the screen
-    // -- which on a phone is wherever the keyboard has pushed it.
-    const below = window.innerHeight - rect.bottom;
-    if (below < 160 && rect.top > below) {
-      panel.style.top = "auto";
-      panel.style.bottom = `${Math.round(window.innerHeight - rect.top + 4)}px`;
-    } else {
+
+    // Stay clear of the sheet's own buttons. They're pinned to the bottom of
+    // the sheet, and a dropdown lying over Save and Cancel would leave someone
+    // unable to finish what they were typing.
+    const actions = input.closest(".modal") && input.closest(".modal").querySelector(".modal-actions");
+    const floor = actions ? Math.min(actions.getBoundingClientRect().top, window.innerHeight) : window.innerHeight;
+
+    const roomBelow = floor - rect.bottom - 10;
+    const roomAbove = rect.top - 10;
+    // Below by default; above when there's more room there -- which on a phone
+    // is wherever the keyboard has pushed the field.
+    const goBelow = roomBelow >= 150 || roomBelow >= roomAbove;
+
+    panel.style.maxHeight = `${Math.max(80, Math.min(220, goBelow ? roomBelow : roomAbove))}px`;
+    if (goBelow) {
       panel.style.bottom = "auto";
       panel.style.top = `${Math.round(rect.bottom + 4)}px`;
+    } else {
+      panel.style.top = "auto";
+      panel.style.bottom = `${Math.round(window.innerHeight - rect.top + 4)}px`;
     }
   };
 
@@ -374,14 +409,21 @@ export function attachSuggest(input, suggestions) {
     active = -1;
   };
 
+  const entry = { input, destroy: () => {} };
   const destroy = () => {
     panel.remove();
+    suggestPanels.delete(entry);
     document.removeEventListener("pointerdown", closeOnOutside, true);
     window.removeEventListener("scroll", reposition, true);
     window.removeEventListener("resize", reposition);
   };
+  entry.destroy = destroy;
+  suggestPanels.add(entry);
 
   const draw = () => {
+    // Rows come and go inside a sheet as items are added and removed, taking
+    // their fields with them; this clears up after those too.
+    sweepSuggestPanels();
     // Only ever open under the field someone is actually in. Without this a
     // value set from elsewhere -- or a stale event -- can leave the panel
     // hanging over the rest of the sheet, swallowing taps meant for it.
@@ -417,7 +459,13 @@ export function attachSuggest(input, suggestions) {
     close();
   };
 
-  input.addEventListener("focus", draw);
+  input.addEventListener("focus", () => {
+    if (input.dataset.suggestSilent) return;
+    draw();
+  });
+  // Tapping a field that already has focus fires no focus event, so this is
+  // what opens the list when someone comes back to it.
+  input.addEventListener("click", draw);
   input.addEventListener("input", () => {
     active = -1;
     draw();

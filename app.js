@@ -524,6 +524,44 @@ function serviceSuggestions(state) {
   return out;
 }
 
+// Shops carry across the driveway in a way service names don't -- the same
+// family takes both cars to the same garage -- so the list is drawn from every
+// vehicle, not just this one. The other vehicles are read once and remembered
+// for the session; this vehicle's own come from live state, so a shop used
+// today shows up immediately where it matters most.
+let shopsElsewhere = null;
+
+async function knownShops(state) {
+  const out = [];
+  const add = (value) => {
+    const shop = String(value || "").trim();
+    if (!shop || out.some((existing) => existing.toLowerCase() === shop.toLowerCase())) return;
+    out.push(shop);
+  };
+
+  [...(state.services || [])]
+    .sort((a, b) => String(b.servicedOn || "").localeCompare(String(a.servicedOn || "")))
+    .forEach((record) => add(record.shop));
+
+  if (!shopsElsewhere) {
+    try {
+      const vehicles = await getDocs(collection(db, "vehicles"));
+      const lists = await Promise.all(
+        vehicles.docs
+          .filter((vehicle) => vehicle.id !== state.id)
+          .map((vehicle) => getDocs(collection(db, "vehicles", vehicle.id, "services")))
+      );
+      shopsElsewhere = lists.flatMap((snap) => snap.docs.map((docSnap) => docSnap.data().shop)).filter(Boolean);
+    } catch (err) {
+      // Not worth failing the sheet over: the list is just shorter.
+      console.warn("Couldn't read shops from the other vehicles", err);
+      shopsElsewhere = [];
+    }
+  }
+  shopsElsewhere.forEach(add);
+  return out;
+}
+
 // A record with receipts says so, without the list having to load any of them.
 function photoTagHtml(service) {
   const count = service.photoCount || 0;
@@ -560,11 +598,17 @@ function serviceHistoryRowHtml(service) {
         ? `<span class="row-note">${escapeHtml(items[0].notes)}</span>`
         : "";
 
+  // With several jobs listed underneath, a made-up heading like "Oil change + 2
+  // more" only repeats the first line of the list. The visit itself is better
+  // identified by when and where it happened, so that becomes the heading.
+  const multiple = items.length > 1;
+  const heading = multiple && bits.length ? bits.join(" · ") : service.title;
+
   return `
     <div class="row service-row done tappable" data-act="edit-service" data-id="${service.id}">
       <div class="row-main">
-        <span class="row-title-text">${escapeHtml(service.title)}</span>
-        <span class="row-meta">${escapeHtml(bits.join(" · "))}</span>
+        <span class="row-title-text${multiple ? " visit-heading" : ""}">${escapeHtml(heading)}</span>
+        ${multiple ? "" : `<span class="row-meta">${escapeHtml(bits.join(" · "))}</span>`}
         ${breakdown}
         ${photoTagHtml(service)}
       </div>
@@ -877,7 +921,14 @@ async function openScheduleServiceForm(state, existing, odometerMiles) {
         value: existing?.dueOdometerMiles != null ? String(existing.dueOdometerMiles) : "",
         placeholder: odometerMiles !== null ? String(odometerMiles + 5000) : "53000",
       },
-      { name: "shop", label: "Shop (optional)", type: "text", value: existing?.shop || "", placeholder: "Dave's Auto" },
+      {
+        name: "shop",
+        label: "Shop (optional)",
+        type: "text",
+        value: existing?.shop || "",
+        placeholder: "Dave's Auto",
+        suggestions: await knownShops(state),
+      },
       { name: "notes", label: "Notes (optional)", type: "textarea", value: existing?.notes || "" },
     ],
     submitLabel: existing ? "Save changes" : "Schedule it",
@@ -923,9 +974,10 @@ async function openScheduleServiceForm(state, existing, odometerMiles) {
 
 async function openCompletedServiceForm(state, existing, odometerMiles, { completing = false } = {}) {
   const isEditingDone = existing && existing.status === "done";
-  const { photos: existingPhotos, error: photoError } = existing
-    ? await loadServicePhotos(state.id, existing.id)
-    : { photos: [], error: null };
+  const [{ photos: existingPhotos, error: photoError }, shops] = await Promise.all([
+    existing ? loadServicePhotos(state.id, existing.id) : { photos: [], error: null },
+    knownShops(state),
+  ]);
   const values = await openFormModal({
     title: completing ? "Mark service done" : isEditingDone ? "Edit service record" : "Log completed service",
     fields: [
@@ -965,6 +1017,7 @@ async function openCompletedServiceForm(state, existing, odometerMiles, { comple
         half: true,
         value: existing?.shop || "",
         placeholder: "Dave's Auto",
+        suggestions: shops,
       },
       {
         name: "photos",

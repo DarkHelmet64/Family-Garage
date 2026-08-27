@@ -264,9 +264,13 @@ filter", offering "Oil change" would slowly split one job into two — and the
 schedule page matches jobs by name, so a split name means a service that looks
 overdue when it isn't.
 
+**The shop box works the same way**, drawn from everywhere you've had work done
+— across all your vehicles, not just this one, since a family tends to use the
+same garage for both cars.
+
 Arrow keys move through the list, Enter takes the highlighted one, Escape puts
 it away — and Enter on a highlighted suggestion picks it rather than saving the
-record.
+record. The list never covers the sheet's own Save and Cancel buttons.
 
 ### One visit, several jobs
 
@@ -276,10 +280,12 @@ was done, what it cost, and any note about that particular job. **+ Add item**
 adds another line, and the **total is added up for you** as you type — no adding
 up the receipt by hand, and no invented number to reconcile against it later.
 
-In the history a single-job visit reads exactly as it always has. A visit with
-several shows the total on the right and breaks the jobs out underneath:
+In the history a single-job visit reads exactly as it always has: the job's
+name, then when and where. A visit covering several is headed by when and where
+instead — with the jobs listed underneath, a name like "Oil change + 2 more"
+would only repeat the first line of the list — and shows the total on the right:
 
-> **Oil change + 2 more** — Aug 27, 2026 · 50,120 mi · Dave's Auto — **$412.35**
+> **Aug 27, 2026 · 50,120 mi · Dave's Auto** — **$412.35**
 > · Oil change $79.95 · Air filter $42.40 · Brake pads $290.00
 
 Records entered before this, and ones brought in by the spreadsheet importer
