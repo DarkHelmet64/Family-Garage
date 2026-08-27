@@ -136,22 +136,12 @@ export function openPickerModal({ title, options, cancelLabel = "Cancel" }) {
 export function openFormModal({ title, hint, fields, submitLabel = "Save", validate, destructive }) {
   return new Promise((resolve) => {
     const fieldHtml = fields.map((field) => renderField(field)).join("");
-    const datalists = fields
-      .filter((field) => field.suggestions)
-      .map(
-        (field) => `
-          <datalist id="list-${escapeHtml(field.name)}">
-            ${field.suggestions.map((s) => `<option value="${escapeHtml(s)}"></option>`).join("")}
-          </datalist>`
-      )
-      .join("");
 
     const overlay = buildModal(
       `
         <h2>${escapeHtml(title)}</h2>
         ${hint ? `<p class="hint">${escapeHtml(hint)}</p>` : ""}
         <div class="form-grid">${fieldHtml}</div>
-        ${datalists}
         <p class="form-error" id="form-error" hidden></p>
         <div class="modal-actions">
           <button class="secondary" id="form-cancel">Cancel</button>
@@ -180,6 +170,14 @@ export function openFormModal({ title, hint, fields, submitLabel = "Save", valid
     for (const field of fields) {
       if (field.type !== "list") continue;
       listState.set(field.name, bindListField(overlay, field));
+    }
+
+    // Bound before the Enter-to-submit handler below, so that when the panel is
+    // open Enter picks the highlighted suggestion instead of saving the sheet.
+    for (const field of fields) {
+      if (field.type === "list" || !field.suggestions) continue;
+      const input = overlay.querySelector(`[data-field="${field.name}"]`);
+      if (input) attachSuggest(input, field.suggestions);
     }
 
     const readValues = () => {
@@ -302,7 +300,6 @@ function renderField(field) {
              ${step ? `step="${escapeHtml(step)}"` : ""}
              ${min !== undefined ? `min="${escapeHtml(min)}"` : ""}
              ${inputmode ? `inputmode="${escapeHtml(inputmode)}"` : ""}
-             ${suggestions ? `list="list-${escapeHtml(name)}"` : ""}
              autocomplete="off" />`;
 
   return `
@@ -311,6 +308,167 @@ function renderField(field) {
       ${control}
       ${hintHtml}
     </div>`;
+}
+
+// A dropdown of things typed before, narrowing as you type.
+//
+// This replaces the browser's own <datalist>, which looks like the right tool
+// and isn't: whether it filters, and whether it appears at all, varies by
+// browser, and on an iPhone -- where this app mostly gets used, standing next
+// to the car -- it is least dependable of all. A short list drawn in the page
+// behaves the same everywhere.
+const SUGGEST_LIMIT = 8;
+
+export function attachSuggest(input, suggestions) {
+  if (!suggestions || !suggestions.length || input.dataset.suggestBound) return;
+  input.dataset.suggestBound = "1";
+
+  // The panel lives on <body> and is positioned over the field, rather than
+  // sitting inside it. Inside, an absolutely positioned panel counts towards
+  // the sheet's scrollable area: opening one made the sheet taller, and closing
+  // it shrank it again and slid everything up by the difference. Press Cancel
+  // with the panel open and the button moved out from under the release --
+  // no click, nothing happened.
+  const panel = document.createElement("div");
+  panel.className = "suggest-panel";
+  panel.hidden = true;
+  document.body.appendChild(panel);
+
+  let matches = [];
+  let active = -1;
+
+  const place = () => {
+    const rect = input.getBoundingClientRect();
+    panel.style.left = `${Math.round(rect.left)}px`;
+    panel.style.width = `${Math.round(rect.width)}px`;
+    // Below by default, above when the field is near the bottom of the screen
+    // -- which on a phone is wherever the keyboard has pushed it.
+    const below = window.innerHeight - rect.bottom;
+    if (below < 160 && rect.top > below) {
+      panel.style.top = "auto";
+      panel.style.bottom = `${Math.round(window.innerHeight - rect.top + 4)}px`;
+    } else {
+      panel.style.bottom = "auto";
+      panel.style.top = `${Math.round(rect.bottom + 4)}px`;
+    }
+  };
+
+  // Anything starting with what's typed comes first, then anything containing
+  // it -- so "oil" offers "Oil change" before "Transmission fluid and oil".
+  const findMatches = (value) => {
+    const query = value.trim().toLowerCase();
+    if (!query) return suggestions.slice(0, SUGGEST_LIMIT);
+    const starts = [];
+    const contains = [];
+    for (const suggestion of suggestions) {
+      const lower = suggestion.toLowerCase();
+      if (lower === query) continue; // already typed in full
+      if (lower.startsWith(query)) starts.push(suggestion);
+      else if (lower.includes(query)) contains.push(suggestion);
+    }
+    return [...starts, ...contains].slice(0, SUGGEST_LIMIT);
+  };
+
+  const close = () => {
+    panel.hidden = true;
+    active = -1;
+  };
+
+  const destroy = () => {
+    panel.remove();
+    document.removeEventListener("pointerdown", closeOnOutside, true);
+    window.removeEventListener("scroll", reposition, true);
+    window.removeEventListener("resize", reposition);
+  };
+
+  const draw = () => {
+    // Only ever open under the field someone is actually in. Without this a
+    // value set from elsewhere -- or a stale event -- can leave the panel
+    // hanging over the rest of the sheet, swallowing taps meant for it.
+    if (document.activeElement !== input) return close();
+    matches = findMatches(input.value);
+    if (!matches.length) return close();
+    panel.innerHTML = matches
+      .map(
+        (suggestion, index) =>
+          `<button type="button" class="suggest-option${index === active ? " active" : ""}"
+                   data-suggest-index="${index}">${escapeHtml(suggestion)}</button>`
+      )
+      .join("");
+    panel.hidden = false;
+    place();
+  };
+
+  const reposition = () => {
+    if (!panel.hidden) place();
+  };
+
+  const choose = (index) => {
+    if (index < 0 || index >= matches.length) return;
+    input.value = matches[index];
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    close();
+    input.focus();
+  };
+
+  const closeOnOutside = (event) => {
+    if (!input.isConnected) return destroy();
+    if (event.target === input || panel.contains(event.target)) return;
+    close();
+  };
+
+  input.addEventListener("focus", draw);
+  input.addEventListener("input", () => {
+    active = -1;
+    draw();
+  });
+
+  input.addEventListener("keydown", (event) => {
+    if (panel.hidden) return;
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      active = event.key === "ArrowDown"
+        ? Math.min(active + 1, matches.length - 1)
+        : Math.max(active - 1, 0);
+      draw();
+      return;
+    }
+    if (event.key === "Enter" && active >= 0) {
+      // Stop the form's own Enter handler: picking a suggestion and saving the
+      // sheet in one keystroke is nobody's intention.
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      choose(active);
+      return;
+    }
+    if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      close();
+    }
+  });
+
+  // mousedown rather than click, so the choice registers before the input
+  // loses focus and takes the panel with it.
+  panel.addEventListener("mousedown", (event) => {
+    const option = event.target.closest("[data-suggest-index]");
+    if (!option) return;
+    event.preventDefault();
+    choose(Number(option.dataset.suggestIndex));
+  });
+
+  input.addEventListener("blur", () =>
+    setTimeout(() => {
+      close();
+      if (!input.isConnected) destroy();
+    }, 120)
+  );
+
+  // A tap anywhere else puts the panel away, and the sheet scrolling under it
+  // keeps it with its field.
+  document.addEventListener("pointerdown", closeOnOutside, true);
+  window.addEventListener("scroll", reposition, true);
+  window.addEventListener("resize", reposition);
 }
 
 // One service visit, several things done. Each row is a line item -- what was
@@ -354,7 +512,7 @@ function bindListField(overlay, field) {
         <div class="item-row" data-item-row>
           <div class="item-row-top">
             <input data-item-title type="text" placeholder="What was done" value="${escapeHtml(row.title)}"
-                   ${field.suggestions ? `list="list-${escapeHtml(field.name)}"` : ""} autocomplete="off" />
+                   autocomplete="off" />
             <input data-item-cost type="number" step="0.01" min="0" inputmode="decimal"
                    placeholder="Cost" value="${escapeHtml(row.cost)}" />
             <button type="button" class="item-remove" data-item-remove="${index}"
@@ -366,6 +524,9 @@ function bindListField(overlay, field) {
       )
       .join("");
 
+    if (field.suggestions) {
+      rowsEl.querySelectorAll("[data-item-title]").forEach((input) => attachSuggest(input, field.suggestions));
+    }
     rowsEl.querySelectorAll("[data-item-remove]").forEach((button) => {
       button.addEventListener("click", () => {
         sync();

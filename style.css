@@ -961,3 +961,45 @@ input[type="file"] {
 }
 
 .badge.unknown { background: var(--bg); color: var(--muted); }
+
+/* Suggestions ------------------------------------------------------------- */
+
+/* `display` here would otherwise beat the hidden attribute, whose only power is
+   a UA-stylesheet display:none -- so the panel would go on covering the sheet
+   after being closed. */
+.suggest-panel[hidden] { display: none; }
+
+/* Positioned over its field from the page, not from inside the sheet -- see the
+   note in ui.js about the sheet's scroll area. */
+.suggest-panel {
+  position: fixed;
+  z-index: 60;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+  overflow-y: auto;
+  max-height: 220px;
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.suggest-option {
+  background: transparent;
+  color: var(--text);
+  border: none;
+  text-align: left;
+  font-weight: 500;
+  font-size: 0.9rem;
+  padding: 9px 10px;
+  border-radius: 7px;
+  width: 100%;
+}
+
+.suggest-option:active,
+.suggest-option.active {
+  background: var(--bg);
+  color: var(--brand);
+}

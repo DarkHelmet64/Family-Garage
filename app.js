@@ -43,7 +43,6 @@ import {
   itemsTotalCents,
   visitTitle,
   scheduleRows,
-  completedJobs,
   STATS_VERSION,
 } from "./stats.js";
 
@@ -327,6 +326,8 @@ function renderVehicleView(id) {
     vehicle: null,
     fillups: null,
     services: null,
+    // Only used to offer better suggestions, so rendering doesn't wait on it.
+    schedule: [],
     showAllFillups: false,
     showHistory: false,
   };
@@ -361,6 +362,16 @@ function renderVehicleView(id) {
     state.services = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
     render();
   });
+
+  onSnapshot(
+    collection(db, "vehicles", id, "schedule"),
+    (snap) => {
+      state.schedule = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    },
+    // The schedule is a nicety here; if it can't be read, the suggestions are
+    // just a little shorter.
+    (err) => console.warn("Couldn't read the service schedule", err)
+  );
 }
 
 function vehicleBodyHtml(state) {
@@ -487,6 +498,30 @@ function serviceRowHtml(service, ctx) {
       </div>
     </div>
   `;
+}
+
+// What to offer in the description dropdown: jobs this vehicle has had before,
+// most recent first, then anything on its schedule, then the common ones. Its
+// own history leads because that's the wording already in use -- offering
+// "Oil change" when every past record says "Oil & filter" would slowly split
+// one job into two.
+function serviceSuggestions(state) {
+  const out = [];
+  const add = (title) => {
+    const value = String(title || "").trim();
+    if (!value || out.some((existing) => existing.toLowerCase() === value.toLowerCase())) return;
+    out.push(value);
+  };
+
+  [...(state.services || [])]
+    .filter((record) => record.status === "done")
+    .sort((a, b) => String(b.servicedOn || "").localeCompare(String(a.servicedOn || "")))
+    .forEach((record) => serviceItems(record).forEach((item) => add(item.title)));
+
+  (state.services || []).filter((record) => record.status !== "done").forEach((record) => add(record.title));
+  (state.schedule || []).forEach((entry) => add(entry.title));
+  SERVICE_SUGGESTIONS.forEach(add);
+  return out;
 }
 
 // A record with receipts says so, without the list having to load any of them.
@@ -829,7 +864,7 @@ async function openScheduleServiceForm(state, existing, odometerMiles) {
         type: "text",
         value: existing?.title || "",
         placeholder: "Oil change",
-        suggestions: SERVICE_SUGGESTIONS,
+        suggestions: serviceSuggestions(state),
       },
       { name: "dueOn", label: "Due date", type: "date", half: true, value: existing?.dueOn || "" },
       {
@@ -899,7 +934,7 @@ async function openCompletedServiceForm(state, existing, odometerMiles, { comple
         label: "What was done",
         type: "list",
         value: existing ? serviceItems(existing) : [],
-        suggestions: SERVICE_SUGGESTIONS,
+        suggestions: serviceSuggestions(state),
         hint: "One trip, several jobs — add a line for each. The total is added up for you.",
       },
       {
@@ -1279,10 +1314,7 @@ function handleScheduleAction(action, id, state) {
 }
 
 async function openPlanForm(state, existing) {
-  // Offer what this vehicle has actually had done as well as the usual list, so
-  // the wording matches the history and the two line up.
-  const seen = [...new Set(completedJobs(state.services).map((job) => job.title))];
-  const suggestions = [...new Set([...seen, ...SERVICE_SUGGESTIONS])];
+  const suggestions = serviceSuggestions(state);
 
   const values = await openFormModal({
     title: existing ? "Edit schedule entry" : "Add to the schedule",

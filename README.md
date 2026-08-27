@@ -252,6 +252,22 @@ Tap **🔧 Add service** for either:
 - **Log service already done** — one trip to the shop, however many jobs it
   covered.
 
+### The description dropdown
+
+The description box on a service record offers what you've entered before,
+narrowing as you type. Tap the box with it empty and you get the list: this
+vehicle's own past jobs first, most recent at the top, then anything on its
+schedule, then the common ones (oil change, tire rotation, inspection…).
+
+Its own history leads on purpose. If every past record on the van says "Oil &
+filter", offering "Oil change" would slowly split one job into two — and the
+schedule page matches jobs by name, so a split name means a service that looks
+overdue when it isn't.
+
+Arrow keys move through the list, Enter takes the highlighted one, Escape puts
+it away — and Enter on a highlighted suggestion picks it rather than saving the
+record.
+
 ### One visit, several jobs
 
 A trip to the shop usually isn't one thing. The date, odometer, shop, and
