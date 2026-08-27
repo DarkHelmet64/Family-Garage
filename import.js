@@ -1,14 +1,19 @@
 // ---------------------------------------------------------------------------
-// Importing a gas log from a spreadsheet.
+// Importing records from a spreadsheet.
 //
-// Nobody's fuel spreadsheet looks like anyone else's: the columns are in a
+// Nobody's vehicle spreadsheet looks like anyone else's: the columns are in a
 // different order, named differently, the dates might be real dates or text,
 // and there's usually a title row or a totals row in the way. So this guesses
 // the layout, shows what it worked out, and lets it be corrected before
 // anything is written.
 //
-// The logic here is deliberately free of Firestore -- app.js hands in the
-// existing fill-ups and a callback that does the writing.
+// Fill-ups and service records go through the same machinery. What differs
+// between them -- which columns to look for, how a row becomes a record, what
+// the preview shows -- lives in a profile at the bottom of the matching
+// section, so there's one import flow rather than two.
+//
+// The logic here is deliberately free of Firestore: app.js hands in the
+// records already stored and a callback that does the writing.
 // ---------------------------------------------------------------------------
 
 import { parseXlsx, excelSerialToISO, SpreadsheetError } from "./xlsx.js";
@@ -17,120 +22,6 @@ import { buildModal, escapeHtml, openAlertModal } from "./ui.js";
 import { formatUSD, formatGallons, formatISO, formatMiles } from "./format.js";
 
 const LITRES_PER_GALLON = 3.785411784;
-
-// ---------------------------------------------------------------------------
-// Working out which column is which
-// ---------------------------------------------------------------------------
-
-// Ordered most specific first: "Price/Gal" has to be claimed as a unit price
-// before "Total" gets a chance to read it as money.
-const FIELD_ORDER = ["date", "odometer", "gallons", "price", "total", "partial", "full", "station"];
-
-const MATCHERS = {
-  date: {
-    exact: ["date", "filldate", "filleddate", "filledon", "datefilled", "day", "when", "fueldate", "purchasedate", "transactiondate"],
-    fuzzy: ["date", "day"],
-  },
-  odometer: {
-    exact: ["odometer", "odo", "mileage", "milage", "miles", "odometerreading", "odoreading", "meter", "mi", "currentmileage", "reading"],
-    fuzzy: ["odometer", "odo", "mileage", "milage", "miles"],
-  },
-  gallons: {
-    exact: ["gallons", "gallon", "gal", "gals", "volume", "quantity", "qty", "fuel", "litres", "liters", "litre", "liter", "fuelvolume"],
-    fuzzy: ["gallon", "litre", "liter", "volume", "quantity", "qty"],
-  },
-  price: {
-    exact: ["pricepergallon", "pricegal", "ppg", "unitprice", "rate", "costpergallon", "pergallon", "priceperlitre", "priceperliter", "perlitre", "perliter"],
-    fuzzy: ["pergallon", "perlitre", "perliter", "unitprice", "ppg"],
-  },
-  total: {
-    exact: ["total", "totalcost", "cost", "amount", "totalprice", "totalamount", "spent", "paid", "price", "amountpaid", "$"],
-    fuzzy: ["total", "cost", "amount", "spent", "paid", "price"],
-  },
-  partial: { exact: ["partial", "partialfill", "partialtank", "topoff", "toppedoff"], fuzzy: ["partial"] },
-  full: { exact: ["full", "fulltank", "filledup", "tankfull", "completefill", "filltype"], fuzzy: ["fulltank", "full"] },
-  station: {
-    exact: ["station", "location", "where", "place", "vendor", "brand", "shop", "notes", "note", "comment", "comments", "description", "gasstation"],
-    fuzzy: ["station", "location", "vendor", "brand", "note", "comment"],
-  },
-};
-
-const normalizeHeader = (raw) => String(raw ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
-
-// One column claims at most one field, so two columns can't both become "Date".
-export function classifyHeader(raw) {
-  const text = String(raw ?? "").trim();
-  if (!text) return null;
-  const lower = text.toLowerCase();
-
-  // "$/gal", "price per litre", "¢/mile" -- a per-unit rate, whatever it's
-  // called. Checked on the raw text because normalizing drops the "/" that
-  // makes it a rate in the first place.
-  if (/(\$|€|£|price|cost|rate)?\s*(\/|per\s*)\s*(gal|gallon|l\b|lit(er|re))/i.test(lower)) return "price";
-
-  // A unit in parentheses says what the column holds, whatever the word in
-  // front of it: "Amount (gal)" is volume, while a plain "Amount" is money.
-  if (/\(\s*(gal|gallons?|lit(er|re)s?|l)\s*\)/i.test(lower) && !/[$€£]|price|cost/i.test(lower)) {
-    return "gallons";
-  }
-
-  const normalized = normalizeHeader(text);
-  if (!normalized) return null;
-
-  for (const field of FIELD_ORDER) {
-    if (MATCHERS[field].exact.includes(normalized)) return field;
-  }
-  for (const field of FIELD_ORDER) {
-    if (MATCHERS[field].fuzzy.some((token) => normalized.includes(token))) return field;
-  }
-  return null;
-}
-
-export function detectColumns(headerRow = []) {
-  const claims = headerRow.map(classifyHeader);
-  const mapping = {};
-  const taken = new Set();
-  for (const field of FIELD_ORDER) {
-    const index = claims.findIndex((claim, i) => claim === field && !taken.has(i));
-    mapping[field] = index;
-    if (index >= 0) taken.add(index);
-  }
-  return mapping;
-}
-
-export function columnIsLitres(header) {
-  return /lit(er|re)|\bl\b|\bltr/i.test(String(header ?? ""));
-}
-
-// The header isn't always row 1 -- people put a title, a note, or a blank line
-// on top. Whichever of the first several rows looks most like a set of column
-// names wins.
-export function detectHeaderRow(rows) {
-  let best = { index: 0, score: 0 };
-  const limit = Math.min(rows.length, 15);
-  for (let i = 0; i < limit; i++) {
-    const row = rows[i] || [];
-    const score = new Set(row.map(classifyHeader).filter(Boolean)).size;
-    if (score > best.score) best = { index: i, score };
-  }
-  return best.score >= 2 ? best.index : 0;
-}
-
-// A workbook often carries a notes tab, a summary tab, and the actual log, and
-// the log is rarely the first one. Score each sheet by how much of a fill-up it
-// can see in its header row, and start on the winner.
-export function pickBestSheet(sheets) {
-  let best = { index: 0, score: -1 };
-  sheets.forEach((sheet, index) => {
-    const headerIndex = detectHeaderRow(sheet.rows);
-    const mapping = detectColumns(sheet.rows[headerIndex] || []);
-    const essentials = ["date", "odometer", "gallons"].filter((f) => mapping[f] >= 0).length;
-    const dataRows = Math.max(0, sheet.rows.length - headerIndex - 1);
-    const score = essentials * 10 + Math.min(dataRows, 5);
-    if (score > best.score) best = { index, score };
-  });
-  return best.index;
-}
 
 // ---------------------------------------------------------------------------
 // Reading values that were typed by a human
@@ -234,19 +125,92 @@ export function toBool(value) {
   return null;
 }
 
-// ---------------------------------------------------------------------------
-// Rows in, fill-ups out
-// ---------------------------------------------------------------------------
-
+const text = (value) => String(value ?? "").trim();
 const isBlankRow = (row) => !row || row.every((cell) => cell === null || cell === undefined || cell === "");
 
-export function buildEntries(rows, { headerRowIndex, mapping, litres = false, dateOrder = null }) {
-  const dateColumn = mapping.date;
-  const order =
-    dateOrder ||
-    detectDateOrder(
-      dateColumn >= 0 ? rows.slice(headerRowIndex + 1).map((row) => (row || [])[dateColumn]) : []
-    );
+// ---------------------------------------------------------------------------
+// Working out which column is which
+// ---------------------------------------------------------------------------
+
+const normalizeHeader = (raw) => String(raw ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
+
+// One column claims at most one field, so two columns can't both become "Date".
+// Fields are tried in the order the profile lists them, most specific first --
+// "Due Date" has to be claimed as a due date before "Date" gets a chance at it.
+export function classifyHeader(raw, profile) {
+  const value = text(raw);
+  if (!value) return null;
+  const lower = value.toLowerCase();
+
+  const early = profile.preClassify && profile.preClassify(lower);
+  if (early) return early;
+
+  const normalized = normalizeHeader(value);
+  if (!normalized) return null;
+
+  for (const field of profile.fields) {
+    if (field.exact.includes(normalized)) return field.key;
+  }
+  for (const field of profile.fields) {
+    if (field.fuzzy.some((token) => normalized.includes(token))) return field.key;
+  }
+  return null;
+}
+
+export function detectColumns(headerRow = [], profile) {
+  const claims = headerRow.map((cell) => classifyHeader(cell, profile));
+  const mapping = {};
+  const taken = new Set();
+  for (const field of profile.fields) {
+    const index = claims.findIndex((claim, i) => claim === field.key && !taken.has(i));
+    mapping[field.key] = index;
+    if (index >= 0) taken.add(index);
+  }
+  return mapping;
+}
+
+// The header isn't always row 1 -- people put a title, a note, or a blank line
+// on top. Whichever of the first several rows looks most like a set of column
+// names wins.
+export function detectHeaderRow(rows, profile) {
+  let best = { index: 0, score: 0 };
+  const limit = Math.min(rows.length, 15);
+  for (let i = 0; i < limit; i++) {
+    const row = rows[i] || [];
+    const score = new Set(row.map((cell) => classifyHeader(cell, profile)).filter(Boolean)).size;
+    if (score > best.score) best = { index: i, score };
+  }
+  return best.score >= 2 ? best.index : 0;
+}
+
+// A workbook often carries a notes tab, a summary tab, and the actual log, and
+// the log is rarely the first one. Score each sheet by how much of a record it
+// can see in its header row, and start on the winner.
+export function pickBestSheet(sheets, profile) {
+  let best = { index: 0, score: -1 };
+  sheets.forEach((sheet, index) => {
+    const headerIndex = detectHeaderRow(sheet.rows, profile);
+    const mapping = detectColumns(sheet.rows[headerIndex] || [], profile);
+    const essentials = profile.essentials.filter((key) => mapping[key] >= 0).length;
+    const dataRows = Math.max(0, sheet.rows.length - headerIndex - 1);
+    const score = essentials * 10 + Math.min(dataRows, 5);
+    if (score > best.score) best = { index, score };
+  });
+  return best.index;
+}
+
+export function columnIsLitres(header) {
+  return /lit(er|re)|\bl\b|\bltr/i.test(String(header ?? ""));
+}
+
+// Walks the data rows, handing each one to the profile to turn into a record.
+// Blank rows are skipped; everything else comes back either as a record or as a
+// row that was left out, with the reason and its real spreadsheet row number.
+function buildRows(rows, { headerRowIndex, mapping, options, profile, dateOrder = null }) {
+  const dateColumns = profile.dateFields
+    .filter((key) => mapping[key] >= 0)
+    .flatMap((key) => rows.slice(headerRowIndex + 1).map((row) => (row || [])[mapping[key]]));
+  const order = dateOrder || detectDateOrder(dateColumns);
 
   const entries = [];
   for (let i = headerRowIndex + 1; i < rows.length; i++) {
@@ -255,22 +219,102 @@ export function buildEntries(rows, { headerRowIndex, mapping, litres = false, da
 
     // Row numbers are the spreadsheet's own, so "row 14" means row 14 in Excel.
     const rowNumber = i + 1;
-    const cell = (field) => (mapping[field] >= 0 ? (row[mapping[field]] ?? null) : null);
+    const cell = (key) => (mapping[key] >= 0 ? (row[mapping[key]] ?? null) : null);
+    const built = profile.buildRecord({ cell, order, options });
+    entries.push({ rowNumber, ...built });
+  }
 
+  return { entries, dateOrder: order };
+}
+
+export { buildRows as buildEntries };
+
+// ---------------------------------------------------------------------------
+// Fill-ups
+// ---------------------------------------------------------------------------
+
+export const FILLUP_PROFILE = {
+  key: "fillups",
+  noun: "fill-up",
+  nounPlural: "fill-ups",
+  title: "Import fill-ups",
+  intro:
+    "Load a gas log out of a spreadsheet. An .xlsx from Excel, Numbers, or Google Sheets works, as does a .csv.",
+  expects: "Date, Odometer, Gallons, Total — in any order",
+  essentials: ["date", "odometer", "gallons"],
+  dateFields: ["date"],
+
+  // Ordered most specific first: "Price/Gal" has to be claimed as a unit price
+  // before "Total" gets a chance to read it as money.
+  fields: [
+    {
+      key: "date",
+      label: "Date",
+      exact: ["date", "filldate", "filleddate", "filledon", "datefilled", "day", "when", "fueldate", "purchasedate", "transactiondate"],
+      fuzzy: ["date", "day"],
+    },
+    {
+      key: "odometer",
+      label: "Odometer",
+      exact: ["odometer", "odo", "mileage", "milage", "miles", "odometerreading", "odoreading", "meter", "mi", "currentmileage", "reading"],
+      fuzzy: ["odometer", "odo", "mileage", "milage", "miles"],
+    },
+    {
+      key: "gallons",
+      label: "Gallons",
+      exact: ["gallons", "gallon", "gal", "gals", "volume", "quantity", "qty", "fuel", "litres", "liters", "litre", "liter", "fuelvolume"],
+      fuzzy: ["gallon", "litre", "liter", "volume", "quantity", "qty"],
+    },
+    {
+      key: "price",
+      label: "Price per gallon",
+      exact: ["pricepergallon", "pricegal", "ppg", "unitprice", "rate", "costpergallon", "pergallon", "priceperlitre", "priceperliter", "perlitre", "perliter"],
+      fuzzy: ["pergallon", "perlitre", "perliter", "unitprice", "ppg"],
+    },
+    {
+      key: "total",
+      label: "Total cost",
+      exact: ["total", "totalcost", "cost", "amount", "totalprice", "totalamount", "spent", "paid", "price", "amountpaid", "$"],
+      fuzzy: ["total", "cost", "amount", "spent", "paid", "price"],
+    },
+    { key: "partial", label: "Partial fill", exact: ["partial", "partialfill", "partialtank", "topoff", "toppedoff"], fuzzy: ["partial"] },
+    { key: "full", label: "Full tank", exact: ["full", "fulltank", "filledup", "tankfull", "completefill", "filltype"], fuzzy: ["fulltank", "full"] },
+    {
+      key: "station",
+      label: "Station / notes",
+      exact: ["station", "location", "where", "place", "vendor", "brand", "shop", "notes", "note", "comment", "comments", "description", "gasstation"],
+      fuzzy: ["station", "location", "vendor", "brand", "note", "comment"],
+    },
+  ],
+
+  preClassify(lower) {
+    // "$/gal", "price per litre" -- a per-unit rate, whatever it's called.
+    // Checked on the raw text because normalizing drops the "/" that makes it
+    // a rate in the first place.
+    if (/(\$|€|£|price|cost|rate)?\s*(\/|per\s*)\s*(gal|gallon|l\b|lit(er|re))/i.test(lower)) return "price";
+    // A unit in parentheses says what the column holds, whatever the word in
+    // front of it: "Amount (gal)" is volume, while a plain "Amount" is money.
+    if (/\(\s*(gal|gallons?|lit(er|re)s?|l)\s*\)/i.test(lower) && !/[$€£]|price|cost/i.test(lower)) return "gallons";
+    return null;
+  },
+
+  // Full and partial describe the same column from opposite ends, so only the
+  // one the sheet actually has is offered.
+  visibleFields: (mapping) =>
+    ["date", "odometer", "gallons", "total", "price", mapping.partial >= 0 ? "partial" : "full", "station"],
+  exclusive: [["full", "partial"]],
+
+  buildRecord({ cell, order, options }) {
     const filledOn = toISODate(cell("date"), order);
     const odometerMiles = toNumber(cell("odometer"));
     const rawGallons = toNumber(cell("gallons"));
-    const gallons = rawGallons === null ? null : litres ? rawGallons / LITRES_PER_GALLON : rawGallons;
+    const gallons = rawGallons === null ? null : options.litres ? rawGallons / LITRES_PER_GALLON : rawGallons;
 
     const problems = [];
     if (!filledOn) problems.push(cell("date") ? "date not understood" : "no date");
     if (odometerMiles === null || odometerMiles < 0) problems.push("no odometer reading");
     if (gallons === null || gallons <= 0) problems.push("no gallons");
-
-    if (problems.length) {
-      entries.push({ rowNumber, status: "skipped", reason: problems.join(", ") });
-      continue;
-    }
+    if (problems.length) return { status: "skipped", reason: problems.join(", ") };
 
     const total = toNumber(cell("total"));
     const unitPrice = toNumber(cell("price"));
@@ -281,42 +325,258 @@ export function buildEntries(rows, { headerRowIndex, mapping, litres = false, da
       : unitPrice !== null ? Math.round(unitPrice * gallons * 100)
       : 0;
 
-    const partialFlag = mapping.partial >= 0 ? toBool(cell("partial")) : null;
-    const fullFlag = mapping.full >= 0 ? toBool(cell("full")) : null;
+    const partialFlag = toBool(cell("partial"));
+    const fullFlag = toBool(cell("full"));
     // With no column for it, assume a full tank: that's what most logs record,
     // and it's what makes the MPG numbers work out.
     const fullTank = partialFlag !== null ? !partialFlag : fullFlag !== null ? fullFlag : true;
 
-    const station = String(cell("station") ?? "").trim().slice(0, 80);
-
-    entries.push({
-      rowNumber,
+    return {
       status: "ok",
       filledOn,
       odometerMiles: Math.round(odometerMiles),
       gallons: Math.round(gallons * 1000) / 1000,
       totalCents: totalCents < 0 ? 0 : totalCents,
       fullTank,
-      station: station || null,
-    });
-  }
+      station: text(cell("station")).slice(0, 80) || null,
+    };
+  },
 
-  return { entries, dateOrder: order };
-}
+  keyOf: (record) => `${record.filledOn}|${record.odometerMiles}`,
 
-export const fillupKey = (entry) => `${entry.filledOn}|${entry.odometerMiles}`;
+  previewColumns: [
+    { label: "Date", get: (e) => formatISO(e.filledOn, { withYear: "auto" }) },
+    { label: "Odometer", get: (e) => formatMiles(e.odometerMiles) },
+    { label: "Gallons", get: (e) => formatGallons(e.gallons) },
+    { label: "Cost", get: (e) => (e.totalCents ? formatUSD(e.totalCents) : null) },
+    { label: "Tank", get: (e) => (e.fullTank ? "Full" : "Partial") },
+  ],
 
-// Importing the same sheet twice shouldn't double every fill-up, and a sheet
+  emptyAdvice:
+    "Nothing here can be imported yet — check that the Date, Odometer, and Gallons columns above point at the right things.",
+
+  extraControls(state, headerRow) {
+    const parts = [];
+    if (state.mapping.gallons >= 0) {
+      parts.push(`
+        <label class="field-check" for="map-litres">
+          <input type="checkbox" id="map-litres" ${state.options.litres ? "checked" : ""} />
+          <span><span class="check-label">That column is in litres</span>
+          <span class="field-hint">Converted to gallons on the way in, so the MPG works out.</span></span>
+        </label>`);
+    }
+    if (state.mapping.total < 0 && state.mapping.price >= 0) {
+      parts.push(`<p class="hint">No total-cost column, so each stop's cost is worked out from the price per gallon.</p>`);
+    }
+    return parts.join("");
+  },
+
+  bindExtras(controlsEl, state, rerender) {
+    const litresBox = controlsEl.querySelector("#map-litres");
+    if (litresBox) {
+      litresBox.addEventListener("change", () => {
+        state.options.litres = litresBox.checked;
+        rerender();
+      });
+    }
+  },
+
+  defaultOptions: (headerRow, mapping) => ({
+    litres: mapping.gallons >= 0 && columnIsLitres(headerRow[mapping.gallons]),
+  }),
+};
+
+// ---------------------------------------------------------------------------
+// Service records
+//
+// A service sheet is usually history -- what was done, when, what it cost. But
+// the same sheet often carries a "next due" column, so a row with nothing but
+// a due date comes in as a scheduled job rather than being thrown away.
+// ---------------------------------------------------------------------------
+
+export const SERVICE_PROFILE = {
+  key: "services",
+  noun: "service record",
+  nounPlural: "service records",
+  title: "Import service records",
+  intro:
+    "Load a service history out of a spreadsheet. An .xlsx from Excel, Numbers, or Google Sheets works, as does a .csv.",
+  expects: "Service, Date, Odometer, Cost — in any order",
+  essentials: ["title", "servicedOn"],
+  dateFields: ["servicedOn", "dueOn"],
+
+  // Due mileage and due date come first: "Next Due" has to be read as a
+  // reminder before the plainer date and mileage matchers take it. And the
+  // mileage one leads, because "Next Due Mileage" contains "next due" -- put
+  // the date field first and it claims the column before the more specific
+  // matcher is even tried.
+  fields: [
+    {
+      key: "dueOdometer",
+      label: "Next due (mi)",
+      exact: ["dueat", "duemileage", "duemiles", "dueodometer", "nextmileage", "nextmiles", "nextodometer", "duemi"],
+      fuzzy: ["duemile", "dueodo", "nextmile", "nextodo", "dueat"],
+    },
+    {
+      key: "dueOn",
+      label: "Next due (date)",
+      exact: ["duedate", "nextdue", "nextduedate", "duebydate", "nextservice", "nextservicedate", "nextdate", "due", "dueby"],
+      fuzzy: ["duedate", "nextdue", "nextservice", "duebydate"],
+    },
+    {
+      key: "title",
+      label: "Service",
+      exact: ["service", "serviceperformed", "servicetype", "work", "workdone", "item", "description", "type", "maintenance", "job", "repair", "task"],
+      fuzzy: ["service", "maintenance", "repair", "description", "workdone"],
+    },
+    {
+      key: "servicedOn",
+      label: "Date done",
+      exact: ["date", "datedone", "dateperformed", "dateserviced", "serviced", "servicedate", "servicedon", "completed", "completedon", "performed", "day", "when"],
+      fuzzy: ["date", "completed", "performed", "serviced"],
+    },
+    {
+      key: "odometer",
+      label: "Odometer",
+      exact: ["odometer", "odo", "mileage", "milage", "miles", "odometerreading", "odoreading", "meter", "mi", "atmileage", "reading"],
+      fuzzy: ["odometer", "odo", "mileage", "milage", "miles"],
+    },
+    {
+      key: "cost",
+      label: "Cost",
+      exact: ["cost", "total", "totalcost", "amount", "price", "paid", "charge", "spent", "$", "invoice", "amountpaid"],
+      fuzzy: ["cost", "total", "amount", "price", "paid", "charge"],
+    },
+    {
+      key: "shop",
+      label: "Shop",
+      exact: ["shop", "garage", "vendor", "provider", "dealer", "dealership", "mechanic", "location", "where", "performedby", "servicedby", "place"],
+      fuzzy: ["shop", "garage", "vendor", "dealer", "mechanic", "performedby"],
+    },
+    {
+      key: "notes",
+      label: "Notes",
+      exact: ["notes", "note", "comment", "comments", "remarks", "remark", "details", "detail", "info"],
+      fuzzy: ["note", "comment", "remark", "detail"],
+    },
+  ],
+
+  visibleFields: () => ["title", "servicedOn", "odometer", "cost", "shop", "notes", "dueOn", "dueOdometer"],
+
+  buildRecord({ cell, order }) {
+    const title = text(cell("title")).slice(0, 80);
+    if (!title) return { status: "skipped", reason: "no service name" };
+
+    const servicedOn = toISODate(cell("servicedOn"), order);
+    const odometerMiles = toNumber(cell("odometer"));
+    const dueOn = toISODate(cell("dueOn"), order);
+    const dueOdometerMiles = toNumber(cell("dueOdometer"));
+    const shop = text(cell("shop")).slice(0, 80) || null;
+    const notes = text(cell("notes")).slice(0, 500) || null;
+
+    // A row that says when the work happened -- or how many miles were on the
+    // clock -- is history. A row with only a due date is still to come.
+    const isDone = !!servicedOn || odometerMiles !== null;
+
+    if (!isDone && !dueOn && dueOdometerMiles === null) {
+      const attempted = cell("servicedOn") || cell("dueOn");
+      return { status: "skipped", reason: attempted ? "date not understood" : "no date or mileage" };
+    }
+
+    if (isDone) {
+      const cost = toNumber(cell("cost"));
+      return {
+        status: "ok",
+        title,
+        recordStatus: "done",
+        servicedOn,
+        odometerMiles: odometerMiles === null ? null : Math.round(odometerMiles),
+        costCents: cost === null ? null : Math.max(0, Math.round(cost * 100)),
+        shop,
+        notes,
+        dueOn: null,
+        dueOdometerMiles: null,
+      };
+    }
+
+    return {
+      status: "ok",
+      title,
+      recordStatus: "scheduled",
+      servicedOn: null,
+      odometerMiles: null,
+      costCents: null,
+      shop,
+      notes,
+      dueOn,
+      dueOdometerMiles: dueOdometerMiles === null ? null : Math.round(dueOdometerMiles),
+    };
+  },
+
+  // Two oil changes on the same day at the same mileage are the same oil
+  // change; two a year apart are not.
+  keyOf: (record) =>
+    [
+      text(record.title).toLowerCase(),
+      record.servicedOn ?? "",
+      record.odometerMiles ?? "",
+      record.dueOn ?? "",
+      record.dueOdometerMiles ?? "",
+    ].join("|"),
+
+  previewColumns: [
+    { label: "Service", get: (e) => e.title },
+    {
+      label: "When",
+      get: (e) =>
+        e.recordStatus === "done"
+          ? e.servicedOn
+            ? formatISO(e.servicedOn, { withYear: "auto" })
+            : null
+          : e.dueOn
+            ? `due ${formatISO(e.dueOn, { withYear: "auto" })}`
+            : `due at ${formatMiles(e.dueOdometerMiles)}`,
+    },
+    {
+      label: "Odometer",
+      get: (e) => (e.odometerMiles !== null ? formatMiles(e.odometerMiles) : null),
+    },
+    { label: "Cost", get: (e) => (e.costCents ? formatUSD(e.costCents) : null) },
+    { label: "Status", get: (e) => (e.recordStatus === "done" ? "Done" : "Scheduled") },
+  ],
+
+  emptyAdvice:
+    "Nothing here can be imported yet — check that the Service column, and a date or an odometer reading, point at the right things.",
+
+  extraControls(state) {
+    const scheduled = state.mapping.dueOn >= 0 || state.mapping.dueOdometer >= 0;
+    return scheduled
+      ? `<p class="hint">Rows with a date or odometer reading come in as history. A row with only a
+         next-due date or mileage comes in as a scheduled job.</p>`
+      : "";
+  },
+
+  bindExtras() {},
+  defaultOptions: () => ({}),
+};
+
+export const PROFILES = { fillups: FILLUP_PROFILE, services: SERVICE_PROFILE };
+
+// ---------------------------------------------------------------------------
+// Duplicates and counts
+// ---------------------------------------------------------------------------
+
+// Importing the same sheet twice shouldn't double every record, and a sheet
 // that repeats a row shouldn't either. The two are worth telling apart: one
 // means "you already have this", the other means "your spreadsheet says this
 // twice", and only the second is a surprise worth pointing at a row for.
-export function markDuplicates(entries, existingFillups = []) {
-  const inLog = new Set(existingFillups.map((f) => `${f.filledOn}|${f.odometerMiles}`));
+export function markDuplicates(entries, existing = [], keyOf) {
+  const inLog = new Set(existing.map(keyOf));
   const inFile = new Map();
 
   for (const entry of entries) {
     if (entry.status !== "ok") continue;
-    const key = fillupKey(entry);
+    const key = keyOf(entry);
     if (inLog.has(key)) {
       entry.status = "duplicate";
       entry.duplicateOf = "log";
@@ -384,37 +644,21 @@ export function columnLabel(index) {
 // The import sheet
 //
 // Two steps: pick a file, then confirm what was made of it. The second step is
-// the important one -- it shows the columns it matched, the first few fill-ups
+// the important one -- it shows the columns it matched, the first few records
 // as they'll be saved, and anything it's going to skip, all before a single
 // write happens.
 // ---------------------------------------------------------------------------
 
-const FIELD_LABELS = {
-  date: "Date",
-  odometer: "Odometer",
-  gallons: "Gallons",
-  total: "Total cost",
-  price: "Price per gallon",
-  full: "Full tank",
-  partial: "Partial fill",
-  station: "Station / notes",
-};
-
-// Only one of these two can be mapped at a time -- they're the same column
-// read in opposite directions.
-const TANK_FIELDS = ["full", "partial"];
-
-export function openImportModal({ vehicleName, existingFillups = [], onImport }) {
+export function openImportModal({ profile, vehicleName, existing = [], onImport }) {
   const overlay = buildModal(`
-    <h2>Import fill-ups</h2>
-    <p class="hint">Load a gas log out of a spreadsheet into ${escapeHtml(vehicleName)}. An
-    .xlsx from Excel, Numbers, or Google Sheets works, as does a .csv. Nothing is saved until
-    you've seen what it made of the file.</p>
+    <h2>${escapeHtml(profile.title)}</h2>
+    <p class="hint">${escapeHtml(profile.intro)} Into ${escapeHtml(vehicleName)}. Nothing is saved
+    until you've seen what it made of the file.</p>
     <div class="field">
       <label for="import-file">Spreadsheet</label>
       <input id="import-file" type="file" accept=".xlsx,.xlsm,.csv,.tsv,.txt" />
       <span class="field-hint">It should have a header row naming the columns — something like
-      Date, Odometer, Gallons, Total. The order doesn't matter.</span>
+      ${escapeHtml(profile.expects)}.</span>
     </div>
     <p class="form-error" id="import-error" hidden></p>
     <div class="modal-actions">
@@ -435,7 +679,7 @@ export function openImportModal({ vehicleName, existingFillups = [], onImport })
       const usable = sheets.filter((sheet) => sheet.rows.some((row) => !isBlankRow(row)));
       if (!usable.length) throw new SpreadsheetError("That file doesn't have any rows in it.");
       overlay.remove();
-      openMappingModal({ fileName: file.name, sheets: usable, existingFillups, onImport });
+      openMappingModal({ profile, fileName: file.name, sheets: usable, existing, onImport });
     } catch (err) {
       // A parse failure is the user's file being unusual, not a crash -- say
       // what happened and leave the picker open so they can try another.
@@ -447,21 +691,20 @@ export function openImportModal({ vehicleName, existingFillups = [], onImport })
   });
 }
 
-function openMappingModal({ fileName, sheets, existingFillups, onImport }) {
-  const state = { sheetIndex: pickBestSheet(sheets), headerRowIndex: 0, mapping: {}, litres: false };
+function openMappingModal({ profile, fileName, sheets, existing, onImport }) {
+  const state = { sheetIndex: pickBestSheet(sheets, profile), headerRowIndex: 0, mapping: {}, options: {} };
 
   const autoDetect = () => {
     const rows = sheets[state.sheetIndex].rows;
-    state.headerRowIndex = detectHeaderRow(rows);
-    state.mapping = detectColumns(rows[state.headerRowIndex] || []);
-    state.litres =
-      state.mapping.gallons >= 0 &&
-      columnIsLitres((rows[state.headerRowIndex] || [])[state.mapping.gallons]);
+    state.headerRowIndex = detectHeaderRow(rows, profile);
+    const headerRow = rows[state.headerRowIndex] || [];
+    state.mapping = detectColumns(headerRow, profile);
+    state.options = profile.defaultOptions(headerRow, state.mapping);
   };
   autoDetect();
 
   const overlay = buildModal(`
-    <h2>Import fill-ups</h2>
+    <h2>${escapeHtml(profile.title)}</h2>
     <p class="hint" id="map-source"></p>
     <!-- What it made of the file comes first: that's the question on the
          reader's mind. The column controls sit underneath as the remedy. -->
@@ -486,21 +729,22 @@ function openMappingModal({ fileName, sheets, existingFillups, onImport }) {
     overlay.querySelector("#map-source").textContent =
       `${fileName}${sheets.length > 1 ? ` · ${sheet.name}` : ""}`;
 
-    controlsEl.innerHTML = controlsHtml(sheets, rows, headerRow, state);
+    controlsEl.innerHTML = controlsHtml(profile, sheets, rows, headerRow, state);
 
-    const { entries } = buildEntries(rows, {
+    const { entries } = buildRows(rows, {
       headerRowIndex: state.headerRowIndex,
       mapping: state.mapping,
-      litres: state.litres,
+      options: state.options,
+      profile,
     });
-    markDuplicates(entries, existingFillups);
+    markDuplicates(entries, existing, profile.keyOf);
     const summary = summarize(entries);
     ready = summary.ready;
 
-    resultEl.innerHTML = resultHtml(summary);
+    resultEl.innerHTML = resultHtml(profile, summary);
     goButton.disabled = ready.length === 0;
     goButton.textContent = ready.length
-      ? `Import ${ready.length} fill-up${ready.length === 1 ? "" : "s"}`
+      ? `Import ${ready.length} ${ready.length === 1 ? profile.noun : profile.nounPlural}`
       : "Nothing to import";
 
     bindControls();
@@ -520,7 +764,9 @@ function openMappingModal({ fileName, sheets, existingFillups, onImport }) {
       state.headerRowIndex = Number(e.target.value);
       // A different header row means different column names, so start the
       // guesses over rather than keeping ones made against the old row.
-      state.mapping = detectColumns(sheets[state.sheetIndex].rows[state.headerRowIndex] || []);
+      const headerRow = sheets[state.sheetIndex].rows[state.headerRowIndex] || [];
+      state.mapping = detectColumns(headerRow, profile);
+      state.options = profile.defaultOptions(headerRow, state.mapping);
       render();
     });
 
@@ -528,23 +774,19 @@ function openMappingModal({ fileName, sheets, existingFillups, onImport }) {
       select.addEventListener("change", () => {
         const field = select.dataset.mapField;
         state.mapping[field] = Number(select.value);
-        // Full and partial describe the same column from opposite ends; letting
-        // both point somewhere would make the tank flag ambiguous.
-        if (TANK_FIELDS.includes(field) && Number(select.value) >= 0) {
-          const other = field === "full" ? "partial" : "full";
-          state.mapping[other] = -1;
+        // Some fields describe the same column from opposite ends; letting both
+        // point somewhere would make the record ambiguous.
+        if (Number(select.value) >= 0) {
+          for (const pair of profile.exclusive || []) {
+            if (!pair.includes(field)) continue;
+            for (const other of pair) if (other !== field) state.mapping[other] = -1;
+          }
         }
         render();
       });
     });
 
-    const litresBox = controlsEl.querySelector("#map-litres");
-    if (litresBox) {
-      litresBox.addEventListener("change", () => {
-        state.litres = litresBox.checked;
-        render();
-      });
-    }
+    profile.bindExtras(controlsEl, state, render);
   };
 
   overlay.querySelector("#map-cancel").addEventListener("click", () => overlay.remove());
@@ -552,6 +794,7 @@ function openMappingModal({ fileName, sheets, existingFillups, onImport }) {
   goButton.addEventListener("click", async () => {
     goButton.disabled = true;
     const total = ready.length;
+    const label = total === 1 ? profile.noun : profile.nounPlural;
     try {
       await onImport(ready, (done) => {
         goButton.textContent = `Importing… ${done} of ${total}`;
@@ -559,7 +802,7 @@ function openMappingModal({ fileName, sheets, existingFillups, onImport }) {
       overlay.remove();
     } catch (err) {
       goButton.disabled = false;
-      goButton.textContent = `Import ${total} fill-up${total === 1 ? "" : "s"}`;
+      goButton.textContent = `Import ${total} ${label}`;
       await openAlertModal(`Couldn't finish the import: ${err.message}`);
     }
   });
@@ -567,7 +810,7 @@ function openMappingModal({ fileName, sheets, existingFillups, onImport }) {
   render();
 }
 
-function controlsHtml(sheets, rows, headerRow, state) {
+function controlsHtml(profile, sheets, rows, headerRow, state) {
   const sheetPicker =
     sheets.length > 1
       ? `<div class="field">
@@ -590,14 +833,12 @@ function controlsHtml(sheets, rows, headerRow, state) {
     `<option value="-1">— none —</option>` +
     headerRow
       .map((cell, i) => {
-        const name = String(cell ?? "").trim();
+        const name = text(cell);
         return `<option value="${i}" ${i === selected ? "selected" : ""}>${escapeHtml(columnLabel(i))}${name ? ` · ${escapeHtml(name.slice(0, 24))}` : ""}</option>`;
       })
       .join("");
 
-  // Whichever of full/partial the sheet actually has is the one worth showing.
-  const tankField = state.mapping.partial >= 0 ? "partial" : "full";
-  const fields = ["date", "odometer", "gallons", "total", "price", tankField, "station"];
+  const labelFor = (key) => (profile.fields.find((f) => f.key === key) || {}).label || key;
 
   return `
     ${sheetPicker}
@@ -607,33 +848,21 @@ function controlsHtml(sheets, rows, headerRow, state) {
     </div>
     <div class="section-title">Columns it used</div>
     <div class="form-grid">
-      ${fields
+      ${profile
+        .visibleFields(state.mapping)
         .map(
-          (field) => `
+          (key) => `
         <div class="field field-half">
-          <label for="map-${field}">${escapeHtml(FIELD_LABELS[field])}</label>
-          <select id="map-${field}" data-map-field="${field}">${columnOptions(state.mapping[field])}</select>
+          <label for="map-${key}">${escapeHtml(labelFor(key))}</label>
+          <select id="map-${key}" data-map-field="${key}">${columnOptions(state.mapping[key])}</select>
         </div>`
         )
         .join("")}
     </div>
-    ${
-      state.mapping.gallons >= 0
-        ? `<label class="field-check" for="map-litres">
-             <input type="checkbox" id="map-litres" ${state.litres ? "checked" : ""} />
-             <span><span class="check-label">That column is in litres</span>
-             <span class="field-hint">Converted to gallons on the way in, so the MPG works out.</span></span>
-           </label>`
-        : ""
-    }
-    ${
-      state.mapping.total < 0 && state.mapping.price >= 0
-        ? `<p class="hint">No total-cost column, so each stop's cost is worked out from the price per gallon.</p>`
-        : ""
-    }`;
+    ${profile.extraControls(state, headerRow)}`;
 }
 
-function resultHtml(summary) {
+function resultHtml(profile, summary) {
   const { ready, readyCount, alreadyLoggedCount, repeatedCount, skipped, issues } = summary;
 
   const counts = [
@@ -644,11 +873,16 @@ function resultHtml(summary) {
   ].join("");
 
   const preview = ready.slice(0, 4);
+  const cell = (value) =>
+    value === null || value === undefined || value === ""
+      ? `<span class="muted">—</span>`
+      : escapeHtml(String(value));
+
   const previewTable = preview.length
     ? `<div class="import-preview-wrap">
          <table class="import-preview">
            <thead>
-             <tr><th>Row</th><th>Date</th><th>Odometer</th><th>Gallons</th><th>Cost</th><th>Tank</th></tr>
+             <tr><th>Row</th>${profile.previewColumns.map((c) => `<th>${escapeHtml(c.label)}</th>`).join("")}</tr>
            </thead>
            <tbody>
              ${preview
@@ -656,11 +890,7 @@ function resultHtml(summary) {
                  (entry) => `
                <tr>
                  <td class="muted">${entry.rowNumber}</td>
-                 <td>${escapeHtml(formatISO(entry.filledOn, { withYear: "auto" }))}</td>
-                 <td>${escapeHtml(formatMiles(entry.odometerMiles))}</td>
-                 <td>${escapeHtml(formatGallons(entry.gallons))}</td>
-                 <td>${entry.totalCents ? escapeHtml(formatUSD(entry.totalCents)) : "<span class='muted'>—</span>"}</td>
-                 <td>${entry.fullTank ? "Full" : "Partial"}</td>
+                 ${profile.previewColumns.map((c) => `<td>${cell(c.get(entry))}</td>`).join("")}
                </tr>`
                )
                .join("")}
@@ -668,8 +898,7 @@ function resultHtml(summary) {
          </table>
        </div>
        ${readyCount > preview.length ? `<p class="hint">…and ${readyCount - preview.length} more.</p>` : ""}`
-    : `<p class="hint">Nothing here can be imported yet — check that the Date, Odometer, and
-       Gallons columns above point at the right things.</p>`;
+    : `<p class="hint">${escapeHtml(profile.emptyAdvice)}</p>`;
 
   const problems = issues.slice(0, 6);
   const problemList = problems.length
@@ -677,7 +906,7 @@ function resultHtml(summary) {
          ${problems.map((p) => `<li><strong>Row ${p.rowNumber}</strong> — ${escapeHtml(p.reason)}</li>`).join("")}
          ${issues.length > problems.length ? `<li class="muted">…and ${issues.length - problems.length} more</li>` : ""}
        </ul>
-       <p class="hint">Rows left out are usually totals lines, gaps in the log, or fill-ups you
+       <p class="hint">Rows left out are usually totals lines, gaps in the log, or records you
        already have. Your spreadsheet isn't changed either way.</p>`
     : "";
 

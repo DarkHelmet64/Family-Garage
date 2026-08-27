@@ -988,13 +988,13 @@ function openVehicleMenu(state) {
     title: state.vehicle.name,
     options: [
       { value: "edit", label: "Edit details" },
-      { value: "import", label: "Import fill-ups from a spreadsheet" },
+      { value: "import", label: "Import from a spreadsheet" },
       { value: "qr", label: "Show QR code" },
       { value: "delete", label: "Delete vehicle" },
     ],
   }).then((choice) => {
     if (choice === "edit") openEditVehicleForm(state);
-    else if (choice === "import") startImport(state);
+    else if (choice === "import") chooseImport(state);
     else if (choice === "qr") openQrModal(location.href, `Scan to open ${state.vehicle.name}`);
     else if (choice === "delete") deleteVehicle(state);
   });
@@ -1065,44 +1065,80 @@ async function deleteVehicle(state) {
 // know Firestore exists.
 // ---------------------------------------------------------------------------
 
+function chooseImport(state) {
+  openPickerModal({
+    title: "Import from a spreadsheet",
+    options: [
+      { value: "fillups", label: "⛽ Fill-ups" },
+      { value: "services", label: "🔧 Service records" },
+    ],
+  }).then((choice) => {
+    if (choice) startImport(state, choice);
+  });
+}
+
 // The spreadsheet readers are a good chunk of code that most sessions never
 // touch, so they're fetched at the moment someone actually imports rather than
 // on every load of the app at a gas pump.
-async function startImport(state) {
-  const { openImportModal } = await import("./import.js");
+async function startImport(state, kind) {
+  const { openImportModal, PROFILES } = await import("./import.js");
+  const importingFuel = kind === "fillups";
+
   openImportModal({
+    profile: PROFILES[kind],
     vehicleName: state.vehicle.name,
-    existingFillups: state.fillups,
+    existing: importingFuel ? state.fillups : state.services,
     onImport: async (entries, onProgress) => {
-      const written = await writeImportedFillups(state.id, entries, onProgress);
+      const written = importingFuel
+        ? await writeImported(state.id, "fillups", entries, fillupDoc, onProgress)
+        : await writeImported(state.id, "services", entries, serviceDoc, onProgress);
       await recomputeSummary(state.id);
-      showToast(`Imported ${written} fill-up${written === 1 ? "" : "s"}`);
+      const noun = importingFuel ? "fill-up" : "service record";
+      showToast(`Imported ${written} ${noun}${written === 1 ? "" : "s"}`);
     },
   });
 }
+
+const fillupDoc = (entry) => ({
+  odometerMiles: entry.odometerMiles,
+  gallons: entry.gallons,
+  totalCents: entry.totalCents,
+  fullTank: entry.fullTank,
+  filledOn: entry.filledOn,
+  station: entry.station,
+});
+
+// Imported service records keep the same shape as ones added by hand, so
+// nothing downstream has to know where they came from. A repeat interval isn't
+// set here on purpose: a history of twelve oil changes would otherwise schedule
+// twelve identical reminders.
+const serviceDoc = (entry) => ({
+  title: entry.title,
+  status: entry.recordStatus,
+  servicedOn: entry.servicedOn,
+  odometerMiles: entry.odometerMiles,
+  costCents: entry.costCents,
+  shop: entry.shop,
+  notes: entry.notes,
+  dueOn: entry.dueOn,
+  dueOdometerMiles: entry.dueOdometerMiles,
+  repeatMiles: null,
+  repeatMonths: null,
+});
 
 // Firestore takes at most 500 writes in a batch, so a long history goes up in
 // chunks -- with the count reported back so the button can say where it's got to.
 const IMPORT_CHUNK = 400;
 
-async function writeImportedFillups(vehicleId, entries, onProgress) {
-  const fillups = collection(db, "vehicles", vehicleId, "fillups");
+async function writeImported(vehicleId, subcollection, entries, toDoc, onProgress) {
+  const target = collection(db, "vehicles", vehicleId, subcollection);
   let written = 0;
 
   for (let start = 0; start < entries.length; start += IMPORT_CHUNK) {
     const chunk = entries.slice(start, start + IMPORT_CHUNK);
     const batch = writeBatch(db);
     for (const entry of chunk) {
-      batch.set(doc(fillups), {
-        odometerMiles: entry.odometerMiles,
-        gallons: entry.gallons,
-        totalCents: entry.totalCents,
-        fullTank: entry.fullTank,
-        filledOn: entry.filledOn,
-        station: entry.station,
-        source: "import",
-        createdAt: serverTimestamp(),
-      });
+      batch.set(doc(target), { ...toDoc(entry), source: "import", createdAt: serverTimestamp() });
     }
     await batch.commit();
     written += chunk.length;

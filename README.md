@@ -21,9 +21,9 @@ home.
   and a starting odometer are optional.
 - Tapping any row in the gas log or the service list opens it for editing, and
   that sheet is also where you delete it.
-- Already keeping this in a spreadsheet? **More > Import fill-ups** reads an
-  `.xlsx` or `.csv` and works out the columns for itself — see
-  [Importing a gas log](#importing-a-gas-log-from-a-spreadsheet).
+- Already keeping this in a spreadsheet? **More > Import from a spreadsheet**
+  reads an `.xlsx` or `.csv` — fill-ups or service records — and works out the
+  columns for itself. See [Importing from a spreadsheet](#importing-from-a-spreadsheet).
 
 There's no PIN or login: anyone with the link can read and write. See the
 security note at the bottom.
@@ -144,23 +144,25 @@ was happy with. Your choice sticks, and readings you've ruled on personally are
 kept out of working out what "usual" means, so one deliberate oddity can't move
 the bar for everything else.
 
-## Importing a gas log from a spreadsheet
+## Importing from a spreadsheet
 
-If you've been keeping fill-ups in Excel, Numbers, or Google Sheets, you don't
-have to retype them. Open a vehicle, tap **More > Import fill-ups from a
-spreadsheet**, and pick an `.xlsx` or a `.csv`.
+If you've been keeping this in Excel, Numbers, or Google Sheets, you don't have
+to retype it. Open a vehicle, tap **More > Import from a spreadsheet**, choose
+**⛽ Fill-ups** or **🔧 Service records**, and pick an `.xlsx` or a `.csv`.
 
 Nothing is written until you've seen what it made of the file. The sheet that
-comes up shows how many fill-ups it found, the first few exactly as they'll be
+comes up shows how many records it found, the first few exactly as they'll be
 saved, and every row it's leaving out with the reason why — then the columns it
 matched, in case any of them need pointing somewhere else.
 
 It works out the layout for you:
 
-- **Column names don't have to match anything.** Date, Fill Date, Odometer, Odo
-  Reading, Mileage, Gallons, Litres, Total, Amount, Price/Gal, Partial?,
-  Station — all recognised, in any order. Anything it gets wrong you can change
-  with the dropdowns, and the preview updates as you do.
+- **Column names don't have to match anything.** For a gas log: Date, Fill Date,
+  Odometer, Odo Reading, Mileage, Gallons, Litres, Total, Amount, Price/Gal,
+  Partial?, Station. For service: Service, Work Done, Maintenance, Date
+  Serviced, Completed, Odo, Cost, Amount, Shop, Garage, Performed By, Notes,
+  Next Due, Due At. All recognised, in any order. Anything it gets wrong you can
+  change with the dropdowns, and the preview updates as you do.
 - **The header doesn't have to be row 1.** Title rows and blank lines above it
   are fine, and a workbook with several tabs opens on the one that actually
   looks like a fuel log.
@@ -168,6 +170,18 @@ It works out the layout for you:
   `3/14/2026`, `14/03/2026`, `March 14, 2026`. If the column is
   day-first, one unambiguous row (anything above the 12th in front) sets the
   whole column that way.
+Rows it can't use (a totals line at the bottom, a fill-up with no odometer
+reading) are listed by their real row number in the spreadsheet, so you can go
+look at row 14 and see row 14.
+
+**Importing the same file twice is safe.** A record already in the log is
+recognised and skipped rather than added again, so you can re-import after
+adding a few rows and only the new ones come across. Rows repeated *within* the
+file are caught the same way, and reported separately so you can tell which is
+which.
+
+### Fill-ups
+
 - **Litres are converted to gallons**, with the box already ticked if the
   column is named that way. Untick it if it's wrong; the gallons in the preview
   change straight away.
@@ -176,19 +190,32 @@ It works out the layout for you:
 - **Full vs. partial tanks** come from a Full Tank or Partial column, whichever
   the sheet has. With neither, every row is treated as a full tank — that's what
   most logs record, and it's what MPG needs.
-
-Rows it can't use (a totals line at the bottom, a fill-up with no odometer
-reading) are listed by their real row number in the spreadsheet, so you can go
-look at row 14 and see row 14.
-
-**Importing the same file twice is safe.** A fill-up already in the log — same
-date, same odometer — is recognised and skipped rather than added again, so you
-can re-import after adding a few rows and only the new ones come across. Rows
-repeated *within* the file are caught the same way, and reported separately so
-you can tell which is which.
+- A fill-up counts as one you already have when its **date and odometer** match.
 
 Once the fill-ups land, MPG, cost per mile, and the rest are recalculated over
 the whole history, imported and hand-entered alike.
+
+### Service records
+
+A service sheet is usually history — what was done, when, and what it cost — but
+plenty of them carry a "next due" column as well, so both come across in one go:
+
+- A row with a **date done or an odometer reading** becomes **history**, with
+  its cost, shop, and notes.
+- A row with **only a next-due date or mileage** becomes a **scheduled job**,
+  and turns up in the Service list (and on the garage badge) like one you'd
+  entered by hand.
+- A row with a name but no date, mileage, or due date can't be placed, so it's
+  left out and listed.
+
+Two records count as the same one when the **service name, date, and odometer**
+all match — so two oil changes a year apart both come across, but importing the
+same sheet twice doesn't double them.
+
+Repeat intervals aren't set by an import, even if the sheet has a column for
+them. A history of twelve oil changes would otherwise schedule twelve identical
+reminders. Set the interval once, on the next service you log or mark done, and
+it carries forward from there.
 
 ### If the file won't open
 
@@ -255,7 +282,7 @@ Then open the printed URL. Firestore reads/writes will work as soon as
 | `index.html` | The page shell — loads the stylesheet and `app.js`. |
 | `app.js` | Screens, forms, and everything that talks to Firestore. |
 | `stats.js` | The MPG and service-due math, kept free of Firestore and the DOM. |
-| `import.js` | Reading a gas log out of a spreadsheet: matching columns, checking rows, and the preview before anything is saved. |
+| `import.js` | Reading fill-ups or service records out of a spreadsheet: matching columns, checking rows, and the preview before anything is saved. One flow, with a profile per record type. |
 | `xlsx.js` | A small .xlsx reader — unzips the file and pulls values out of the sheet XML, with no library. |
 | `csv.js` | A CSV reader, for the "just export it as CSV" path. |
 | `format.js` | Formatting money, miles, gallons, and dates. |
