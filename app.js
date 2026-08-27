@@ -1458,8 +1458,9 @@ const fillupDoc = (entry) => ({
 const serviceDoc = (entry) => ({
   title: entry.title,
   status: entry.recordStatus,
-  // One spreadsheet row is one job, which is a visit with a single item.
-  items: [{ title: entry.title, costCents: entry.costCents, notes: entry.notes }],
+  // Rows from one trip to the shop arrive already folded into a single visit,
+  // each job a line on it.
+  items: entry.items || [{ title: entry.title, costCents: entry.costCents, notes: entry.notes }],
   servicedOn: entry.servicedOn,
   odometerMiles: entry.odometerMiles,
   costCents: entry.costCents,

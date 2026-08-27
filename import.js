@@ -20,6 +20,7 @@ import { parseXlsx, excelSerialToISO, SpreadsheetError } from "./xlsx.js";
 import { parseCsv } from "./csv.js";
 import { buildModal, escapeHtml, openAlertModal } from "./ui.js";
 import { formatUSD, formatGallons, formatISO, formatMiles } from "./format.js";
+import { visitTitle, itemsTotalCents } from "./stats.js";
 
 const LITRES_PER_GALLON = 3.785411784;
 
@@ -485,13 +486,17 @@ export const SERVICE_PROFILE = {
 
     if (isDone) {
       const cost = toNumber(cell("cost"));
+      const costCents = cost === null ? null : Math.max(0, Math.round(cost * 100));
       return {
         status: "ok",
         title,
         recordStatus: "done",
+        // One row is one job. Grouping below may fold several of these together
+        // into a single visit.
+        items: [{ title, costCents, notes }],
         servicedOn,
         odometerMiles: odometerMiles === null ? null : Math.round(odometerMiles),
-        costCents: cost === null ? null : Math.max(0, Math.round(cost * 100)),
+        costCents,
         shop,
         notes,
         dueOn: null,
@@ -513,6 +518,47 @@ export const SERVICE_PROFILE = {
     };
   },
 
+  // Rows that share a day, an odometer reading and a shop were one trip to that
+  // shop, and the app records a trip as a single visit with a line per job. So
+  // a sheet that lists them separately -- which is how a spreadsheet has to --
+  // comes in the way it would have been entered by hand, with the total added
+  // up from the lines.
+  //
+  // Only completed work is folded together. A "next due" row is a reminder in
+  // its own right, however many share its date.
+  groupEntries(entries, options) {
+    if (options.groupVisits === false) return entries;
+
+    const visits = new Map();
+    const out = [];
+
+    for (const entry of entries) {
+      if (entry.status !== "ok" || entry.recordStatus !== "done") {
+        out.push(entry);
+        continue;
+      }
+      const key = [entry.servicedOn ?? "", entry.odometerMiles ?? "", text(entry.shop).toLowerCase()].join("|");
+      if (!visits.has(key)) {
+        const visit = { ...entry, items: [], rowNumbers: [] };
+        visits.set(key, visit);
+        out.push(visit);
+      }
+      const visit = visits.get(key);
+      visit.items.push(...entry.items);
+      visit.rowNumbers.push(entry.rowNumber);
+    }
+
+    for (const visit of visits.values()) {
+      visit.title = visitTitle(visit.items);
+      visit.costCents = itemsTotalCents(visit.items);
+      // Notes belong to the job they were written against, not to the visit.
+      visit.notes = null;
+      visit.rowNumber = visit.rowNumbers[0];
+    }
+
+    return out;
+  },
+
   // Two oil changes on the same day at the same mileage are the same oil
   // change; two a year apart are not.
   keyOf: (record) =>
@@ -523,6 +569,23 @@ export const SERVICE_PROFILE = {
       record.dueOn ?? "",
       record.dueOdometerMiles ?? "",
     ].join("|"),
+
+  // A record already saved may hold several jobs, and each of them should be
+  // recognised on its own when a sheet listing them separately is imported.
+  existingKeys: (record) => {
+    const items = Array.isArray(record.items) && record.items.length
+      ? record.items
+      : [{ title: record.title, costCents: record.costCents ?? null }];
+    return items.map((item) =>
+      [
+        text(item.title).toLowerCase(),
+        record.servicedOn ?? "",
+        record.odometerMiles ?? "",
+        record.dueOn ?? "",
+        record.dueOdometerMiles ?? "",
+      ].join("|")
+    );
+  },
 
   previewColumns: [
     { label: "Service", get: (e) => e.title },
@@ -550,14 +613,31 @@ export const SERVICE_PROFILE = {
 
   extraControls(state) {
     const scheduled = state.mapping.dueOn >= 0 || state.mapping.dueOdometer >= 0;
-    return scheduled
-      ? `<p class="hint">Rows with a date or odometer reading come in as history. A row with only a
-         next-due date or mileage comes in as a scheduled job.</p>`
-      : "";
+    return `
+      <label class="field-check" for="map-group">
+        <input type="checkbox" id="map-group" ${state.options.groupVisits === false ? "" : "checked"} />
+        <span><span class="check-label">Combine rows from the same visit</span>
+        <span class="field-hint">Rows sharing a date, odometer reading and shop become one visit with
+        a line per job, and the costs are added up. Untick to keep every row separate.</span></span>
+      </label>
+      ${
+        scheduled
+          ? `<p class="hint">Rows with a date or odometer reading come in as history. A row with only a
+             next-due date or mileage comes in as a scheduled job.</p>`
+          : ""
+      }`;
   },
 
-  bindExtras() {},
-  defaultOptions: () => ({}),
+  bindExtras(controlsEl, state, rerender) {
+    const box = controlsEl.querySelector("#map-group");
+    if (!box) return;
+    box.addEventListener("change", () => {
+      state.options.groupVisits = box.checked;
+      rerender();
+    });
+  },
+
+  defaultOptions: () => ({ groupVisits: true }),
 };
 
 export const PROFILES = { fillups: FILLUP_PROFILE, services: SERVICE_PROFILE };
@@ -570,8 +650,11 @@ export const PROFILES = { fillups: FILLUP_PROFILE, services: SERVICE_PROFILE };
 // that repeats a row shouldn't either. The two are worth telling apart: one
 // means "you already have this", the other means "your spreadsheet says this
 // twice", and only the second is a surprise worth pointing at a row for.
-export function markDuplicates(entries, existing = [], keyOf) {
-  const inLog = new Set(existing.map(keyOf));
+export function markDuplicates(entries, existing = [], keyOf, existingKeys = (record) => [keyOf(record)]) {
+  // A record already in the log may cover several jobs, and each of them counts
+  // as one you already have -- otherwise re-importing a sheet whose rows were
+  // merged into one visit would bring them all back in again.
+  const inLog = new Set(existing.flatMap(existingKeys));
   const inFile = new Map();
 
   for (const entry of entries) {
@@ -737,8 +820,11 @@ function openMappingModal({ profile, fileName, sheets, existing, onImport }) {
       options: state.options,
       profile,
     });
-    markDuplicates(entries, existing, profile.keyOf);
-    const summary = summarize(entries);
+    // De-duplicate row by row first, against the jobs already in the log, then
+    // fold what's left into visits -- so a repeated row is caught as a repeat
+    // rather than quietly becoming a second line on the same visit.
+    markDuplicates(entries, existing, profile.keyOf, profile.existingKeys);
+    const summary = summarize(profile.groupEntries ? profile.groupEntries(entries, state.options) : entries);
     ready = summary.ready;
 
     resultEl.innerHTML = resultHtml(profile, summary);
@@ -889,7 +975,11 @@ function resultHtml(profile, summary) {
                .map(
                  (entry) => `
                <tr>
-                 <td class="muted">${entry.rowNumber}</td>
+                 <td class="muted">${
+                   entry.rowNumbers && entry.rowNumbers.length > 1
+                     ? `${entry.rowNumbers[0]}–${entry.rowNumbers[entry.rowNumbers.length - 1]}`
+                     : entry.rowNumber
+                 }</td>
                  ${profile.previewColumns.map((c) => `<td>${cell(c.get(entry))}</td>`).join("")}
                </tr>`
                )

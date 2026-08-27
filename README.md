@@ -197,6 +197,23 @@ the whole history, imported and hand-entered alike.
 
 ### Service records
 
+**Rows from the same trip become one visit.** A spreadsheet has to list three
+jobs as three rows, but three jobs done on the same day at the same odometer
+reading and the same shop were one trip — so they come in as one visit with a
+line each, and the total added up, exactly as if you'd entered them by hand:
+
+> rows 2–4 → **Oil change + 2 more** · Feb 4, 2026 · 50,120 mi · Dave's Auto ·
+> **$412.35**
+
+Same day but a different shop stays a separate visit, and a "next due" row is
+its own reminder however many share its date. Untick **Combine rows from the
+same visit** in the import sheet to keep every row separate instead; the preview
+updates as you do, and shows which rows each visit came from.
+
+Re-importing stays safe: every job inside a saved visit is matched
+individually, so a sheet whose rows were merged is recognised row by row the
+second time rather than coming back in as duplicates.
+
 A service sheet is usually history — what was done, when, and what it cost — but
 plenty of them carry a "next due" column as well, so both come across in one go:
 
