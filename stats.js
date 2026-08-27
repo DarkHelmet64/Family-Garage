@@ -5,7 +5,7 @@
 // try out in a console): everything takes plain objects and returns numbers.
 // ---------------------------------------------------------------------------
 
-import { daysUntil } from "./format.js";
+import { daysUntil, addMonthsISO } from "./format.js";
 
 // Odometer is the honest ordering key -- someone entering a receipt they found
 // in the glovebox gets slotted into the right place in the sequence regardless
@@ -233,6 +233,29 @@ export function computeFuelStats(fillups) {
   };
 }
 
+// A service visit is one trip to the shop, and one trip usually covers several
+// jobs. Those live in an `items` array; records written before that existed --
+// or by the spreadsheet importer, one row at a time -- have a single job
+// described by the record's own fields, so they're read as a one-item visit.
+export function serviceItems(record) {
+  if (Array.isArray(record.items) && record.items.length) return record.items;
+  return [{ title: record.title || "", costCents: record.costCents ?? null, notes: record.notes || null }];
+}
+
+export function itemsTotalCents(items) {
+  const total = items.reduce((sum, item) => sum + (item.costCents || 0), 0);
+  return total || null;
+}
+
+// What the lists call the visit: the job itself when there was only one, and
+// otherwise the first job with a count of the rest.
+export function visitTitle(items) {
+  const named = items.filter((item) => item.title);
+  if (!named.length) return "Service";
+  if (named.length === 1) return named[0].title;
+  return `${named[0].title} + ${named.length - 1} more`;
+}
+
 // How close a scheduled service is, by whichever of its two triggers is nearer.
 // "soon" is 30 days or 500 miles out -- close enough to book an appointment.
 const SOON_DAYS = 30;
@@ -277,4 +300,87 @@ export function compareServices(a, b, ctx) {
   if (odoA !== odoB) return odoA - odoB;
 
   return String(a.title || "").localeCompare(String(b.title || ""));
+}
+
+// ---------------------------------------------------------------------------
+// The service schedule
+//
+// A record says what was done. A schedule entry says how often it comes round
+// on this vehicle -- every so many miles, every so many months, or both. Put
+// the two together and you get the question people actually have: when is this
+// next needed?
+//
+// Intervals belong to the vehicle rather than to the app, because they differ:
+// a van towing a trailer wants its oil changed sooner than a commuter car, and
+// two vehicles in the same driveway rarely share a service book.
+// ---------------------------------------------------------------------------
+
+const normalizeJob = (title) => String(title || "").trim().toLowerCase();
+
+// Every job in a vehicle's history, flattened out of the visits that contain
+// them, so a job done as part of a three-item visit still counts as done.
+export function completedJobs(services) {
+  const jobs = [];
+  for (const record of services) {
+    if (record.status !== "done") continue;
+    for (const item of serviceItems(record)) {
+      if (!item.title) continue;
+      jobs.push({
+        title: item.title,
+        servicedOn: record.servicedOn ?? null,
+        odometerMiles: record.odometerMiles ?? null,
+        record,
+      });
+    }
+  }
+  return jobs;
+}
+
+// The most recent time a particular job was done. "Most recent" goes by
+// odometer where both have one, since that's the reading the next interval is
+// measured from; date breaks the tie.
+export function lastDoneFor(title, services) {
+  const wanted = normalizeJob(title);
+  const matches = completedJobs(services).filter((job) => normalizeJob(job.title) === wanted);
+  if (!matches.length) return null;
+
+  return matches.sort((a, b) => {
+    if (a.odometerMiles !== null && b.odometerMiles !== null && a.odometerMiles !== b.odometerMiles) {
+      return a.odometerMiles - b.odometerMiles;
+    }
+    return String(a.servicedOn || "").localeCompare(String(b.servicedOn || ""));
+  })[matches.length - 1];
+}
+
+// When an entry is next needed: the last time it was done plus its interval.
+// With no history there's nothing to measure from, so it reads as due now --
+// the first time you log one, the clock starts.
+export function nextDueFor(entry, lastDone) {
+  if (!lastDone) return { dueOn: null, dueOdometerMiles: null, neverDone: true };
+  return {
+    dueOn: entry.everyMonths && lastDone.servicedOn ? addMonthsISO(lastDone.servicedOn, entry.everyMonths) : null,
+    dueOdometerMiles:
+      entry.everyMiles && lastDone.odometerMiles !== null ? lastDone.odometerMiles + entry.everyMiles : null,
+    neverDone: false,
+  };
+}
+
+// The whole page in one call: each entry with when it was last done, when it's
+// next needed, and how urgent that is -- most pressing first.
+export function scheduleRows(schedule, services, { odometerMiles = null, today = new Date() } = {}) {
+  const rows = schedule.map((entry) => {
+    const lastDone = lastDoneFor(entry.title, services);
+    const due = nextDueFor(entry, lastDone);
+    const status = due.neverDone
+      ? { key: "unknown", label: "Not logged yet" }
+      : serviceStatus({ status: "scheduled", dueOn: due.dueOn, dueOdometerMiles: due.dueOdometerMiles },
+          { odometerMiles, today });
+    return { ...entry, lastDone, ...due, status };
+  });
+
+  const rank = { overdue: 0, soon: 1, unknown: 2, scheduled: 3 };
+  return rows.sort((a, b) => {
+    if (rank[a.status.key] !== rank[b.status.key]) return rank[a.status.key] - rank[b.status.key];
+    return String(a.title || "").localeCompare(String(b.title || ""));
+  });
 }

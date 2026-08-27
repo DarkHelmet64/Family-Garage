@@ -270,6 +270,37 @@ Nothing here sends notifications — there's no server to send them. The app kno
 what's due whenever you open it, which is what the badge on the garage list is
 for.
 
+### The service schedule
+
+**More > Service schedule** is where you say how often each job comes round on
+*this* vehicle — every 5,000 miles, every 6 months, or both, whichever falls
+first. Intervals belong to the vehicle because they differ: a van that tows
+wants its oil changed sooner than a car doing the school run, and two vehicles
+in the same driveway rarely share a service book.
+
+Each row then answers the question the page exists for — when is this next
+needed:
+
+> **Oil change** — every 5,000 mi or every 6 months
+> last done Aug 27, 2026 at 52,400 mi
+> next: due Feb 27, 2027 (in 184 days) · due at 57,400 mi (5,000 mi away)
+
+Overdue first, then due soon, then anything you've never logged (there's nothing
+to count from until you do — the first one you log starts the clock), then the
+rest. Nothing here is stored as a reminder: the next-due figures are worked out
+from your history every time the page opens, so **logging a service moves them
+on its own**. Shorten an interval and every date recalculates on the spot.
+
+A job done as part of a multi-item visit counts — if your February trip covered
+an oil change, an air filter and brake pads, all three have their own last-done
+date and their own next-due.
+
+**Add to list** on a row that's due puts it on the vehicle's service list as a
+booked job, so it turns up in the Service section and on the garage badge
+alongside anything you scheduled by hand. That step is deliberate: the schedule
+is a rule about how often something comes round, and the service list is what
+you've actually committed to.
+
 ### Receipt photos
 
 A completed service record can carry photos of the receipt. They're added in the
@@ -328,7 +359,7 @@ Then open the printed URL. Firestore reads/writes will work as soon as
 | --- | --- |
 | `index.html` | The page shell — loads the stylesheet and `app.js`. |
 | `app.js` | Screens, forms, and everything that talks to Firestore. |
-| `stats.js` | The MPG and service-due math, kept free of Firestore and the DOM. |
+| `stats.js` | The MPG, service-due and schedule math, kept free of Firestore and the DOM. |
 | `import.js` | Reading fill-ups or service records out of a spreadsheet: matching columns, checking rows, and the preview before anything is saved. One flow, with a profile per record type. |
 | `photos.js` | Shrinking a photographed receipt down to something that fits beside its record. |
 | `xlsx.js` | A small .xlsx reader — unzips the file and pulls values out of the sheet XML, with no library. |

@@ -35,7 +35,17 @@ import {
   openQrModal,
   mpgChartSvg,
 } from "./ui.js";
-import { computeFuelStats, serviceStatus, compareServices, STATS_VERSION } from "./stats.js";
+import {
+  computeFuelStats,
+  serviceStatus,
+  compareServices,
+  serviceItems,
+  itemsTotalCents,
+  visitTitle,
+  scheduleRows,
+  completedJobs,
+  STATS_VERSION,
+} from "./stats.js";
 
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
@@ -45,6 +55,7 @@ const $app = document.getElementById("app");
 const params = new URLSearchParams(location.search);
 const vehicleId = params.get("vehicle");
 const isNewVehiclePage = params.has("new");
+const isSchedulePage = params.has("schedule");
 
 // Common services, offered as a datalist so the same wording gets reused across
 // vehicles instead of "Oil change" / "oil chg" / "Oil".
@@ -74,6 +85,8 @@ function route() {
     renderConfigMissing();
   } else if (isNewVehiclePage) {
     renderNewVehicleView();
+  } else if (vehicleId && isSchedulePage) {
+    renderScheduleView(vehicleId);
   } else if (vehicleId) {
     renderVehicleView(vehicleId);
   } else {
@@ -473,29 +486,6 @@ function serviceRowHtml(service, ctx) {
       </div>
     </div>
   `;
-}
-
-// A service visit is one trip to the shop, and one trip usually covers several
-// jobs. Those live in an `items` array; records written before that existed --
-// or by the spreadsheet importer, one row at a time -- have a single job
-// described by the record's own fields, so they're read as a one-item visit.
-function serviceItems(record) {
-  if (Array.isArray(record.items) && record.items.length) return record.items;
-  return [{ title: record.title || "", costCents: record.costCents ?? null, notes: record.notes || null }];
-}
-
-function itemsTotalCents(items) {
-  const total = items.reduce((sum, item) => sum + (item.costCents || 0), 0);
-  return total || null;
-}
-
-// What the lists call the visit: the job itself when there was only one, and
-// otherwise the first job with a count of the rest.
-function visitTitle(items) {
-  const named = items.filter((item) => item.title);
-  if (!named.length) return "Service";
-  if (named.length === 1) return named[0].title;
-  return `${named[0].title} + ${named.length - 1} more`;
 }
 
 // A record with receipts says so, without the list having to load any of them.
@@ -1051,13 +1041,15 @@ function openVehicleMenu(state) {
   openPickerModal({
     title: state.vehicle.name,
     options: [
+      { value: "schedule", label: "Service schedule" },
       { value: "edit", label: "Edit details" },
       { value: "import", label: "Import from a spreadsheet" },
       { value: "qr", label: "Show QR code" },
       { value: "delete", label: "Delete vehicle" },
     ],
   }).then((choice) => {
-    if (choice === "edit") openEditVehicleForm(state);
+    if (choice === "schedule") location.search = `?vehicle=${state.id}&schedule`;
+    else if (choice === "edit") openEditVehicleForm(state);
     else if (choice === "import") chooseImport(state);
     else if (choice === "qr") openQrModal(location.href, `Scan to open ${state.vehicle.name}`);
     else if (choice === "delete") deleteVehicle(state);
@@ -1118,13 +1110,247 @@ async function deleteVehicle(state) {
     const photoSnap = await getDocs(collection(db, "vehicles", state.id, "services", service.id, "photos"));
     photoSnap.forEach((photo) => batch.delete(photo.ref));
   }
-  for (const sub of ["fillups", "services"]) {
+  for (const sub of ["fillups", "services", "schedule"]) {
     const snap = await getDocs(collection(db, "vehicles", state.id, sub));
     snap.forEach((docSnap) => batch.delete(docSnap.ref));
   }
   batch.delete(doc(db, "vehicles", state.id));
   await batch.commit();
   location.search = "";
+}
+
+// ---------------------------------------------------------------------------
+// Service schedule
+//
+// The rest of the app records what happened. This page records what's supposed
+// to happen: how often each job comes round on this vehicle. Intervals sit on
+// the vehicle because they differ between them -- a van that tows wants its oil
+// changed sooner than a car that does the school run.
+//
+// Nothing here is a reminder in its own right; the next-due figures are worked
+// out from the history every time the page opens, so logging a service moves
+// them on its own. "Add to service list" is there for when you want one to show
+// up alongside the jobs you've booked in.
+// ---------------------------------------------------------------------------
+
+function renderScheduleView(id) {
+  $app.innerHTML = `
+    <a class="back-link" href="?vehicle=${encodeURIComponent(id)}">&larr; Back</a>
+    <div id="schedule-body"><p class="loading">Loading…</p></div>
+  `;
+
+  const bodyEl = document.getElementById("schedule-body");
+  const state = { id, vehicle: null, services: null, fillups: [], schedule: null };
+
+  bodyEl.addEventListener("click", (event) => {
+    const target = event.target.closest("[data-act]");
+    if (target) handleScheduleAction(target.dataset.act, target.dataset.id, state);
+  });
+
+  const render = () => {
+    if (!state.vehicle || !state.services || !state.schedule) return;
+    bodyEl.innerHTML = scheduleBodyHtml(state);
+  };
+
+  onSnapshot(doc(db, "vehicles", id), (snap) => {
+    if (!snap.exists()) {
+      bodyEl.innerHTML = `<div class="card"><p class="empty">This vehicle doesn't exist any more.</p></div>`;
+      return;
+    }
+    state.vehicle = { id: snap.id, ...snap.data() };
+    render();
+  });
+  onSnapshot(collection(db, "vehicles", id, "services"), (snap) => {
+    state.services = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    render();
+  });
+  onSnapshot(collection(db, "vehicles", id, "fillups"), (snap) => {
+    state.fillups = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    render();
+  });
+  onSnapshot(collection(db, "vehicles", id, "schedule"), (snap) => {
+    state.schedule = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    render();
+  });
+}
+
+function scheduleBodyHtml(state) {
+  const odometerMiles = currentOdometer(state.vehicle, state.fillups, state.services);
+  const rows = scheduleRows(state.schedule, state.services, { odometerMiles, today: new Date() });
+
+  return `
+    <h1><span class="emoji">🔧</span>Service schedule</h1>
+    <p class="hint">${escapeHtml(state.vehicle.name)} · ${formatMiles(odometerMiles)} on the odometer.
+    How often each job comes round, and when it's next needed. Worked out from what you've
+    logged, so it moves on its own as you log more.</p>
+
+    ${
+      rows.length
+        ? `<div class="list schedule-list">${rows.map((row) => scheduleRowHtml(row, odometerMiles)).join("")}</div>`
+        : `<p class="empty small">Nothing set up yet. Add the jobs this vehicle needs on a
+           schedule — an oil change every 5,000 miles, an inspection every year — and this page
+           will tell you when each one is next due.</p>`
+    }
+
+    <button class="secondary full-action" data-act="add-plan">+ Add a service</button>
+  `;
+}
+
+function intervalText(entry) {
+  const parts = [];
+  if (entry.everyMiles) parts.push(`every ${entry.everyMiles.toLocaleString()} mi`);
+  if (entry.everyMonths) parts.push(`every ${entry.everyMonths} month${entry.everyMonths === 1 ? "" : "s"}`);
+  return parts.join(" or ") || "no interval set";
+}
+
+function scheduleRowHtml(row, odometerMiles) {
+  const lastDone = row.lastDone
+    ? `last done ${[
+        row.lastDone.servicedOn ? formatISO(row.lastDone.servicedOn) : null,
+        row.lastDone.odometerMiles !== null ? `at ${formatMiles(row.lastDone.odometerMiles)}` : null,
+      ]
+        .filter(Boolean)
+        .join(" ")}`
+    : "never logged — the first one you log starts the clock";
+
+  const next = row.neverDone
+    ? ""
+    : `<span class="row-meta">next: ${escapeHtml(dueSummary(row, odometerMiles))}</span>`;
+
+  const canSchedule = row.status.key === "overdue" || row.status.key === "soon";
+
+  return `
+    <div class="row service-row ${row.status.key} tappable" data-act="edit-plan" data-id="${row.id}">
+      <div class="row-main">
+        <span class="row-title-text">${escapeHtml(row.title)}</span>
+        <span class="row-meta">${escapeHtml(intervalText(row))}</span>
+        <span class="row-meta">${escapeHtml(lastDone)}</span>
+        ${next}
+      </div>
+      <div class="row-side">
+        <span class="badge ${row.status.key}">${escapeHtml(row.status.label)}</span>
+        ${canSchedule ? `<button class="approve small" data-act="book-plan" data-id="${row.id}">Add to list</button>` : ""}
+      </div>
+    </div>
+  `;
+}
+
+function handleScheduleAction(action, id, state) {
+  if (!state.vehicle) return;
+  switch (action) {
+    case "add-plan":
+      openPlanForm(state, null);
+      break;
+    case "edit-plan":
+      openPlanForm(state, state.schedule.find((entry) => entry.id === id) || null);
+      break;
+    case "book-plan":
+      bookPlanEntry(state, id);
+      break;
+  }
+}
+
+async function openPlanForm(state, existing) {
+  // Offer what this vehicle has actually had done as well as the usual list, so
+  // the wording matches the history and the two line up.
+  const seen = [...new Set(completedJobs(state.services).map((job) => job.title))];
+  const suggestions = [...new Set([...seen, ...SERVICE_SUGGESTIONS])];
+
+  const values = await openFormModal({
+    title: existing ? "Edit schedule entry" : "Add to the schedule",
+    hint: "Set a mileage interval, a time interval, or both — whichever comes round first is what counts.",
+    fields: [
+      {
+        name: "title",
+        label: "Service",
+        type: "text",
+        value: existing?.title || "",
+        placeholder: "Oil change",
+        suggestions,
+      },
+      {
+        name: "everyMiles",
+        label: "Every (mi)",
+        type: "number",
+        inputmode: "numeric",
+        min: 0,
+        half: true,
+        value: existing?.everyMiles != null ? String(existing.everyMiles) : "",
+        placeholder: "5000",
+      },
+      {
+        name: "everyMonths",
+        label: "…or every (months)",
+        type: "number",
+        inputmode: "numeric",
+        min: 0,
+        half: true,
+        value: existing?.everyMonths != null ? String(existing.everyMonths) : "",
+        placeholder: "6",
+      },
+    ],
+    submitLabel: existing ? "Save changes" : "Add it",
+    destructive: existing ? { label: "Remove from the schedule" } : null,
+    validate: (v) => {
+      if (!v.title) return "What service is it?";
+      if (!v.everyMiles && !v.everyMonths) return "Add a mileage interval, a time interval, or both.";
+      return null;
+    },
+  });
+  if (!values) return;
+
+  if (values.__destructive) {
+    await deleteDoc(doc(db, "vehicles", state.id, "schedule", existing.id));
+    showToast("Removed from the schedule");
+    return;
+  }
+
+  const payload = {
+    title: values.title,
+    everyMiles: values.everyMiles ? Math.round(Number(values.everyMiles)) : null,
+    everyMonths: values.everyMonths ? Math.round(Number(values.everyMonths)) : null,
+  };
+
+  if (existing) {
+    await updateDoc(doc(db, "vehicles", state.id, "schedule", existing.id), payload);
+  } else {
+    await addDoc(collection(db, "vehicles", state.id, "schedule"), { ...payload, createdAt: serverTimestamp() });
+  }
+  showToast(existing ? "Schedule updated" : "Added to the schedule");
+}
+
+// Turns a due entry into a real scheduled job, so it appears in the vehicle's
+// service list and on the garage badge alongside anything booked in by hand.
+async function bookPlanEntry(state, id) {
+  const odometerMiles = currentOdometer(state.vehicle, state.fillups, state.services);
+  const row = scheduleRows(state.schedule, state.services, { odometerMiles, today: new Date() })
+    .find((entry) => entry.id === id);
+  if (!row) return;
+
+  const alreadyThere = state.services.some(
+    (service) => service.status !== "done" && String(service.title).toLowerCase() === row.title.toLowerCase()
+  );
+  if (alreadyThere) {
+    await openAlertModal(`${row.title} is already on the service list.`);
+    return;
+  }
+
+  await addDoc(collection(db, "vehicles", state.id, "services"), {
+    title: row.title,
+    status: "scheduled",
+    dueOn: row.dueOn,
+    dueOdometerMiles: row.dueOdometerMiles,
+    shop: null,
+    notes: null,
+    servicedOn: null,
+    odometerMiles: null,
+    costCents: null,
+    repeatMiles: row.everyMiles,
+    repeatMonths: row.everyMonths,
+    createdAt: serverTimestamp(),
+  });
+  await recomputeSummary(state.id);
+  showToast(`${row.title} added to the service list`);
 }
 
 // ---------------------------------------------------------------------------

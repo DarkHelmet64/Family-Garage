@@ -35,6 +35,20 @@ service cloud.firestore {
         allow delete: if true;
       }
 
+      // How often each job comes round on this vehicle. Rules, not records --
+      // the next-due dates are worked out from the service history.
+      match /schedule/{entryId} {
+        allow read: if true;
+        allow create, update: if request.resource.data.keys().hasAll(['title'])
+                               && request.resource.data.title is string
+                               && request.resource.data.title.size() > 0
+                               && (request.resource.data.everyMiles == null
+                                   || request.resource.data.everyMiles is number)
+                               && (request.resource.data.everyMonths == null
+                                   || request.resource.data.everyMonths is number);
+        allow delete: if true;
+      }
+
       match /services/{serviceId} {
         allow read: if true;
         allow create, update: if request.resource.data.keys().hasAll(['title', 'status'])

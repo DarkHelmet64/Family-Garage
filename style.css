@@ -948,3 +948,16 @@ input[type="file"] {
   font-size: 0.75rem;
   color: var(--muted);
 }
+
+/* Service schedule -------------------------------------------------------- */
+
+.schedule-list .row-meta { line-height: 1.5; }
+
+/* An entry with no history yet has nothing to count from, so it reads as
+   neutral rather than as a problem. */
+.service-row.unknown {
+  box-shadow: inset 4px 0 0 var(--border);
+  padding-left: 16px;
+}
+
+.badge.unknown { background: var(--bg); color: var(--muted); }
