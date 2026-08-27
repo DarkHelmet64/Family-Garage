@@ -232,8 +232,26 @@ Tap **🔧 Add service** for either:
 - **Schedule something coming up** — a name ("Oil change", "State inspection"),
   and a due date, a due mileage, or both. Whichever comes first is what the
   reminder goes by.
-- **Log service already done** — what it was, when, the odometer, what it cost,
-  and which shop.
+- **Log service already done** — one trip to the shop, however many jobs it
+  covered.
+
+### One visit, several jobs
+
+A trip to the shop usually isn't one thing. The date, odometer, shop, and
+receipt are shared, so you enter those once and add a line for each job: what
+was done, what it cost, and any note about that particular job. **+ Add item**
+adds another line, and the **total is added up for you** as you type — no adding
+up the receipt by hand, and no invented number to reconcile against it later.
+
+In the history a single-job visit reads exactly as it always has. A visit with
+several shows the total on the right and breaks the jobs out underneath:
+
+> **Oil change + 2 more** — Aug 27, 2026 · 50,120 mi · Dave's Auto — **$412.35**
+> · Oil change $79.95 · Air filter $42.40 · Brake pads $290.00
+
+Records entered before this, and ones brought in by the spreadsheet importer
+(one row is one job), are read as a visit with a single line, so nothing needed
+converting.
 
 Open services are sorted with the most pressing first and color-coded: red for
 **overdue** (the date has passed, or you've driven past the mileage), amber for

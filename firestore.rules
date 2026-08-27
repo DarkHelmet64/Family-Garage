@@ -40,7 +40,12 @@ service cloud.firestore {
         allow create, update: if request.resource.data.keys().hasAll(['title', 'status'])
                                && request.resource.data.title is string
                                && request.resource.data.title.size() > 0
-                               && request.resource.data.status in ['scheduled', 'done'];
+                               && request.resource.data.status in ['scheduled', 'done']
+                               // One visit can cover several jobs; older records
+                               // have no list and describe a single one.
+                               && (!request.resource.data.keys().hasAny(['items'])
+                                   || (request.resource.data.items is list
+                                       && request.resource.data.items.size() <= 50));
         allow delete: if true;
 
         // Receipt photos, one per document, stored as a shrunk-down JPEG data

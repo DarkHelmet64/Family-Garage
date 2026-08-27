@@ -475,6 +475,29 @@ function serviceRowHtml(service, ctx) {
   `;
 }
 
+// A service visit is one trip to the shop, and one trip usually covers several
+// jobs. Those live in an `items` array; records written before that existed --
+// or by the spreadsheet importer, one row at a time -- have a single job
+// described by the record's own fields, so they're read as a one-item visit.
+function serviceItems(record) {
+  if (Array.isArray(record.items) && record.items.length) return record.items;
+  return [{ title: record.title || "", costCents: record.costCents ?? null, notes: record.notes || null }];
+}
+
+function itemsTotalCents(items) {
+  const total = items.reduce((sum, item) => sum + (item.costCents || 0), 0);
+  return total || null;
+}
+
+// What the lists call the visit: the job itself when there was only one, and
+// otherwise the first job with a count of the rest.
+function visitTitle(items) {
+  const named = items.filter((item) => item.title);
+  if (!named.length) return "Service";
+  if (named.length === 1) return named[0].title;
+  return `${named[0].title} + ${named.length - 1} more`;
+}
+
 // A record with receipts says so, without the list having to load any of them.
 function photoTagHtml(service) {
   const count = service.photoCount || 0;
@@ -491,12 +514,32 @@ function serviceHistoryRowHtml(service) {
     service.shop || null,
   ].filter(Boolean);
 
+  const items = serviceItems(service);
+  // One job reads as it always has. Several are broken out underneath, each
+  // with what it cost, since that's the point of entering them separately.
+  const breakdown =
+    items.length > 1
+      ? `<ul class="item-breakdown">
+           ${items
+             .map(
+               (item) => `
+             <li>
+               <span>${escapeHtml(item.title)}${item.notes ? `<span class="item-note">${escapeHtml(item.notes)}</span>` : ""}</span>
+               <span class="item-cost">${item.costCents ? escapeHtml(formatUSD(item.costCents)) : ""}</span>
+             </li>`
+             )
+             .join("")}
+         </ul>`
+      : items[0] && items[0].notes
+        ? `<span class="row-note">${escapeHtml(items[0].notes)}</span>`
+        : "";
+
   return `
     <div class="row service-row done tappable" data-act="edit-service" data-id="${service.id}">
       <div class="row-main">
         <span class="row-title-text">${escapeHtml(service.title)}</span>
         <span class="row-meta">${escapeHtml(bits.join(" · "))}</span>
-        ${service.notes ? `<span class="row-note">${escapeHtml(service.notes)}</span>` : ""}
+        ${breakdown}
         ${photoTagHtml(service)}
       </div>
       <div class="row-side">
@@ -847,12 +890,12 @@ async function openCompletedServiceForm(state, existing, odometerMiles, { comple
     title: completing ? "Mark service done" : isEditingDone ? "Edit service record" : "Log completed service",
     fields: [
       {
-        name: "title",
-        label: "Service",
-        type: "text",
-        value: existing?.title || "",
-        placeholder: "Oil change",
+        name: "items",
+        label: "What was done",
+        type: "list",
+        value: existing ? serviceItems(existing) : [],
         suggestions: SERVICE_SUGGESTIONS,
+        hint: "One trip, several jobs — add a line for each. The total is added up for you.",
       },
       {
         name: "servicedOn",
@@ -876,17 +919,6 @@ async function openCompletedServiceForm(state, existing, odometerMiles, { comple
               : "",
       },
       {
-        name: "cost",
-        label: "Cost (optional)",
-        type: "number",
-        step: "0.01",
-        inputmode: "decimal",
-        min: 0,
-        half: true,
-        value: existing?.costCents ? (existing.costCents / 100).toFixed(2) : "",
-        placeholder: "79.95",
-      },
-      {
         name: "shop",
         label: "Shop (optional)",
         type: "text",
@@ -894,7 +926,6 @@ async function openCompletedServiceForm(state, existing, odometerMiles, { comple
         value: existing?.shop || "",
         placeholder: "Dave's Auto",
       },
-      { name: "notes", label: "Notes (optional)", type: "textarea", value: existing?.notes || "" },
       {
         name: "photos",
         label: "Receipt photos (optional)",
@@ -926,9 +957,12 @@ async function openCompletedServiceForm(state, existing, odometerMiles, { comple
     submitLabel: completing ? "Mark done" : "Save",
     destructive: isEditingDone ? { label: "Delete this service record" } : null,
     validate: (v) => {
-      if (!v.title) return "What service was it?";
+      const named = (v.items || []).filter((item) => item.title);
+      if (!named.length) return "What was done? Add at least one item.";
       if (!v.servicedOn) return "Pick the date it was done.";
-      if (v.cost && Number.isNaN(dollarsToCents(v.cost))) return "That cost doesn't look like an amount.";
+      if ((v.items || []).some((item) => item.costCents !== null && Number.isNaN(item.costCents))) {
+        return "One of those costs doesn't look like an amount.";
+      }
       return null;
     },
   });
@@ -942,14 +976,20 @@ async function openCompletedServiceForm(state, existing, odometerMiles, { comple
   const repeatMiles = values.repeatMiles ? Math.round(Number(values.repeatMiles)) : null;
   const repeatMonths = values.repeatMonths ? Math.round(Number(values.repeatMonths)) : null;
 
+  const items = (values.items || []).filter((item) => item.title);
   const payload = {
-    title: values.title,
+    title: visitTitle(items),
     status: "done",
     servicedOn: values.servicedOn,
     odometerMiles: odo,
-    costCents: values.cost ? dollarsToCents(values.cost) : null,
+    items,
+    // Kept alongside the items so lists and totals don't have to add them up
+    // every time they render.
+    costCents: itemsTotalCents(items),
     shop: values.shop || null,
-    notes: values.notes || null,
+    // Notes belong to the item they're about now; the field stays on the record
+    // so anything written before this still reads back.
+    notes: null,
     repeatMiles,
     repeatMonths,
     dueOn: null,
@@ -973,7 +1013,7 @@ async function openCompletedServiceForm(state, existing, odometerMiles, { comple
   // point of recording "every 5,000 miles" -- otherwise it lives in your head.
   if (repeatMiles || repeatMonths) {
     await addDoc(services, {
-      title: values.title,
+      title: payload.title,
       status: "scheduled",
       dueOn: repeatMonths ? addMonthsISO(values.servicedOn, repeatMonths) : null,
       dueOdometerMiles: repeatMiles && odo !== null ? odo + repeatMiles : null,
@@ -1192,6 +1232,8 @@ const fillupDoc = (entry) => ({
 const serviceDoc = (entry) => ({
   title: entry.title,
   status: entry.recordStatus,
+  // One spreadsheet row is one job, which is a visit with a single item.
+  items: [{ title: entry.title, costCents: entry.costCents, notes: entry.notes }],
   servicedOn: entry.servicedOn,
   odometerMiles: entry.odometerMiles,
   costCents: entry.costCents,

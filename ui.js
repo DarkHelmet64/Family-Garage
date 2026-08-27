@@ -6,7 +6,7 @@
 // home-screen icon, which is exactly how this app gets used at a gas pump.
 // ---------------------------------------------------------------------------
 
-import { formatMpg, formatISO } from "./format.js";
+import { formatMpg, formatISO, formatUSD, dollarsToCents } from "./format.js";
 import { readReceiptPhoto, PhotoError, formatBytes } from "./photos.js";
 
 export function escapeHtml(str) {
@@ -173,11 +173,24 @@ export function openFormModal({ title, hint, fields, submitLabel = "Save", valid
       bindPhotoField(overlay, field, photoState.get(field.name), errorEl);
     }
 
+    // A list field (the line items on a service visit) keeps its rows in its
+    // own state and hands back a read function, since the rows come and go
+    // while the sheet is open.
+    const listState = new Map();
+    for (const field of fields) {
+      if (field.type !== "list") continue;
+      listState.set(field.name, bindListField(overlay, field));
+    }
+
     const readValues = () => {
       const values = {};
       for (const field of fields) {
         if (field.type === "photos") {
           values[field.name] = photoState.get(field.name);
+          continue;
+        }
+        if (field.type === "list") {
+          values[field.name] = listState.get(field.name).read();
           continue;
         }
         const input = overlay.querySelector(`[data-field="${field.name}"]`);
@@ -242,6 +255,19 @@ function renderField(field) {
   const shared = `data-field="${escapeHtml(name)}" id="field-${escapeHtml(name)}"`;
   const hintHtml = hint ? `<span class="field-hint">${escapeHtml(hint)}</span>` : "";
 
+  if (type === "list") {
+    return `
+      <div class="field" data-list-field="${escapeHtml(name)}">
+        <label>${escapeHtml(label)}</label>
+        <div class="item-list" data-list-rows="${escapeHtml(name)}"></div>
+        <div class="item-list-foot">
+          <button type="button" class="secondary small" data-list-add="${escapeHtml(name)}">+ Add item</button>
+          <span class="item-total" data-list-total="${escapeHtml(name)}"></span>
+        </div>
+        ${hintHtml}
+      </div>`;
+  }
+
   if (type === "photos") {
     return `
       <div class="field" data-photo-field="${escapeHtml(name)}">
@@ -285,6 +311,96 @@ function renderField(field) {
       ${control}
       ${hintHtml}
     </div>`;
+}
+
+// One service visit, several things done. Each row is a line item -- what was
+// done, what it cost, and any note about it -- and the total underneath is the
+// sum, so nobody has to add up a receipt by hand.
+//
+// Rows are read out of the DOM before every re-render, so half-typed text
+// survives adding or removing a row.
+function bindListField(overlay, field) {
+  const rowsEl = overlay.querySelector(`[data-list-rows="${field.name}"]`);
+  const totalEl = overlay.querySelector(`[data-list-total="${field.name}"]`);
+  const addButton = overlay.querySelector(`[data-list-add="${field.name}"]`);
+
+  let rows = (field.value || []).map((item) => ({
+    title: item.title || "",
+    cost: item.costCents !== null && item.costCents !== undefined ? (item.costCents / 100).toFixed(2) : "",
+    notes: item.notes || "",
+  }));
+  if (!rows.length) rows = [{ title: "", cost: "", notes: "" }];
+
+  const sync = () => {
+    rows = [...rowsEl.querySelectorAll("[data-item-row]")].map((row) => ({
+      title: row.querySelector("[data-item-title]").value,
+      cost: row.querySelector("[data-item-cost]").value,
+      notes: row.querySelector("[data-item-notes]").value,
+    }));
+  };
+
+  const updateTotal = () => {
+    const cents = [...rowsEl.querySelectorAll("[data-item-cost]")].reduce((sum, input) => {
+      const value = dollarsToCents(input.value);
+      return sum + (input.value && Number.isFinite(value) ? value : 0);
+    }, 0);
+    totalEl.textContent = cents ? `Total ${formatUSD(cents)}` : "";
+  };
+
+  const render = () => {
+    rowsEl.innerHTML = rows
+      .map(
+        (row, index) => `
+        <div class="item-row" data-item-row>
+          <div class="item-row-top">
+            <input data-item-title type="text" placeholder="What was done" value="${escapeHtml(row.title)}"
+                   ${field.suggestions ? `list="list-${escapeHtml(field.name)}"` : ""} autocomplete="off" />
+            <input data-item-cost type="number" step="0.01" min="0" inputmode="decimal"
+                   placeholder="Cost" value="${escapeHtml(row.cost)}" />
+            <button type="button" class="item-remove" data-item-remove="${index}"
+                    title="Remove this item" ${rows.length === 1 ? "disabled" : ""}>×</button>
+          </div>
+          <input data-item-notes type="text" placeholder="Notes for this item (optional)"
+                 value="${escapeHtml(row.notes)}" autocomplete="off" />
+        </div>`
+      )
+      .join("");
+
+    rowsEl.querySelectorAll("[data-item-remove]").forEach((button) => {
+      button.addEventListener("click", () => {
+        sync();
+        rows.splice(Number(button.dataset.itemRemove), 1);
+        render();
+      });
+    });
+    rowsEl.querySelectorAll("[data-item-cost]").forEach((input) => {
+      input.addEventListener("input", updateTotal);
+    });
+    updateTotal();
+  };
+
+  addButton.addEventListener("click", () => {
+    sync();
+    rows.push({ title: "", cost: "", notes: "" });
+    render();
+    const inputs = rowsEl.querySelectorAll("[data-item-title]");
+    inputs[inputs.length - 1].focus();
+  });
+
+  render();
+
+  return {
+    read: () => {
+      sync();
+      return rows
+        .filter((row) => row.title.trim() || row.cost.trim() || row.notes.trim())
+        .map((row) => ({
+          title: row.title.trim(),
+          costCents: row.cost.trim() ? dollarsToCents(row.cost) : null,
+          notes: row.notes.trim() || null,
+        }));
+    },
+  };
 }
 
 // A strip of thumbnails with an Add tile on the end. Tapping a thumbnail opens

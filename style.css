@@ -862,3 +862,89 @@ input[type="file"] {
   letter-spacing: 0;
   font-size: 0.72rem;
 }
+
+/* Service line items ------------------------------------------------------ */
+
+.item-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.item-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg);
+}
+
+.item-row-top {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+/* The description takes what's left; the cost only needs room for a price. */
+.item-row-top input[data-item-title] { flex: 1 1 auto; min-width: 0; }
+.item-row-top input[data-item-cost] { flex: 0 0 92px; }
+
+.item-row input { font-size: 0.92rem; padding: 8px 10px; }
+
+.item-remove {
+  flex: 0 0 auto;
+  background: transparent;
+  color: var(--muted);
+  border: none;
+  font-size: 1.3rem;
+  line-height: 1;
+  padding: 4px 6px;
+  font-weight: 400;
+}
+
+.item-remove:active { background: transparent; color: var(--red); }
+.item-remove:disabled { opacity: 0.25; }
+
+.item-list-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.item-total {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The breakdown under a multi-job visit in the history list. */
+.item-breakdown {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.item-breakdown li {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 0.82rem;
+}
+
+.item-breakdown .item-cost {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.item-note {
+  display: block;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
