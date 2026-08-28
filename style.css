@@ -404,12 +404,6 @@ button:disabled { opacity: 0.5; cursor: default; }
 
 .stat-cell .stat-label { font-size: 0.68rem; }
 
-.stat-sub {
-  font-size: 0.62rem;
-  color: var(--muted);
-  margin-top: 1px;
-}
-
 /* Rows (services + fill-ups) --------------------------------------------- */
 
 .list { display: flex; flex-direction: column; gap: 8px; }
