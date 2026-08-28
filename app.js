@@ -470,22 +470,18 @@ function statsGridHtml(summary, serviceCostCents) {
     {
       label: "Cost per mile",
       value: summary.costPerMileCents !== null ? `${(summary.costPerMileCents).toFixed(1)}¢` : "—",
-      sub:
-        costPerMileWithServiceCents !== null
-          ? `${costPerMileWithServiceCents.toFixed(1)}¢ w/ service`
-          : null,
     },
+    { label: "Avg price", value: formatPricePerGallon(summary.avgPriceCents), unit: "/gal" },
+    { label: "Fuel total", value: formatUSD(summary.totalCostCents) },
+    // A second row, lined up under the fuel-only figures above, that folds
+    // service history into each one -- the true cost of keeping the car, not
+    // just what went through the pump.
     {
-      label: "Avg price",
-      value: formatPricePerGallon(summary.avgPriceCents),
-      unit: "/gal",
-      sub: `${formatUSD(serviceCostCents)} service total`,
+      label: "Cost per mile w/ service",
+      value: costPerMileWithServiceCents !== null ? `${costPerMileWithServiceCents.toFixed(1)}¢` : "—",
     },
-    {
-      label: "Fuel total",
-      value: formatUSD(summary.totalCostCents),
-      sub: `${formatUSD(totalCostCents)} w/ service`,
-    },
+    { label: "Service total", value: formatUSD(serviceCostCents) },
+    { label: "Total w/ service", value: formatUSD(totalCostCents) },
   ];
   return `
     <div class="stat-grid">
@@ -495,7 +491,6 @@ function statsGridHtml(summary, serviceCostCents) {
         <div class="stat-cell">
           <span class="stat-value">${escapeHtml(cell.value)}${cell.unit ? `<span class="stat-unit">${escapeHtml(cell.unit)}</span>` : ""}</span>
           <span class="stat-label">${escapeHtml(cell.label)}</span>
-          ${cell.sub ? `<span class="stat-sub">${escapeHtml(cell.sub)}</span>` : ""}
         </div>`
         )
         .join("")}
