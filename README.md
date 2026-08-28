@@ -298,6 +298,26 @@ Records entered before this, and ones brought in by the spreadsheet importer
 (one row is one job), are read as a visit with a single line, so nothing needed
 converting.
 
+#### Turning the list into a visit
+
+With more than one job waiting, **🔧 Log these as one visit** sits under the
+Service section and opens that same sheet with the work already typed in: a line
+per job in the order the list shows them, each job's note beside it, the parts
+those jobs said they'd need added up across all of them, and the shop if every
+one of them names the same shop. Fill in what each cost and save, and you get
+**one** record covering the lot.
+
+The jobs that were still on the sheet when you saved come off the service list —
+the visit is now what says they were done. **Take a line off** and its job stays
+where it was: that's how you say you didn't get to that one after all. The
+schedule picks all of this up on its own, since a job done inside a multi-item
+visit counts as done, so their next-due dates move forward without you touching
+the schedule page.
+
+Renaming a line rather than removing it leaves its job on the list too — matching
+is by name, and the app would rather leave something behind than delete the wrong
+thing.
+
 Open services are sorted with the most pressing first and color-coded: red for
 **overdue** (the date has passed, or you've driven past the mileage), amber for
 **due soon** (within 30 days or 500 miles), plain for everything further out.
@@ -340,11 +360,18 @@ A job done as part of a multi-item visit counts — if your February trip covere
 an oil change, an air filter and brake pads, all three have their own last-done
 date and their own next-due.
 
-**Add to list** on a row that's due puts it on the vehicle's service list as a
-booked job, so it turns up in the Service section and on the garage badge
-alongside anything you scheduled by hand. That step is deliberate: the schedule
-is a rule about how often something comes round, and the service list is what
-you've actually committed to.
+**Add to list** on any row — overdue, months off, or never logged — puts it on
+the vehicle's service list as a booked job, so it turns up in the Service
+section and on the garage badge alongside anything you scheduled by hand. That
+step is deliberate: the schedule is a rule about how often something comes
+round, and the service list is what you've actually committed to. You decide
+what you're doing on Saturday, not the interval, so every job can be added; only
+the pressing ones get the green button. A row already on the list says so
+instead of offering to add a second copy.
+
+Once there's more than one job waiting, the Service section on the vehicle page
+offers **🔧 Log these as one visit** — see [One visit, several
+jobs](#one-visit-several-jobs).
 
 ### Receipt photos
 

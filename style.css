@@ -186,6 +186,10 @@ button:disabled { opacity: 0.5; cursor: default; }
   margin-top: 22px;
 }
 
+/* An action belonging to the list right above it rather than to the page, so
+   it sits close enough to read as part of it. */
+.full-action.list-action { margin-top: 10px; }
+
 .single-action {
   text-align: center;
   margin: 14px 0;
@@ -970,6 +974,13 @@ input[type="file"] {
 }
 
 .badge.unknown { background: var(--bg); color: var(--muted); }
+
+/* Where the "Add to list" button would be, once the job is already waiting on
+   the vehicle's list -- an answer rather than a second chance to add it. */
+.schedule-list .on-list {
+  font-style: italic;
+  white-space: nowrap;
+}
 
 /* Suggestions ------------------------------------------------------------- */
 
