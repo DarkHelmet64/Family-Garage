@@ -523,6 +523,19 @@ function planRowHtml(row, parts) {
 
 const PART_UNITS = ["each", "qt", "gal", "L", "oz", "box", "set", "pair", "ft"];
 
+const PART_CATEGORIES = [
+  "Filters",
+  "Fluids",
+  "Brakes",
+  "Tires & wheels",
+  "Belts & hoses",
+  "Ignition",
+  "Electrical",
+  "Wipers",
+  "Lighting",
+  "Shop supplies",
+];
+
 function renderPartsView() {
   $app.innerHTML = `
     <a class="back-link" href="./">&larr; Garage</a>
@@ -534,7 +547,7 @@ function renderPartsView() {
     <div id="parts-list"><p class="loading">Loading…</p></div>
   `;
 
-  const state = { parts: [] };
+  const state = { parts: [], vehicles: [] };
   $app.addEventListener("click", (event) => {
     const target = event.target.closest("[data-act]");
     if (!target) return;
@@ -542,6 +555,18 @@ function renderPartsView() {
   });
 
   const listEl = document.getElementById("parts-list");
+
+  // Only needed to name the vehicles a part fits -- the shelf itself renders
+  // without waiting on them, and one that can't be read just goes unnamed.
+  onSnapshot(
+    collection(db, "vehicles"),
+    (snap) => {
+      state.vehicles = snap.docs.map((d) => ({ id: d.id, name: d.data().name }));
+      state.vehicles.sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")));
+      if (state.parts.length) drawParts(listEl, state);
+    },
+    (err) => console.warn("Couldn't read the vehicle list", err)
+  );
   onSnapshot(
     collection(db, "parts"),
     (snap) => {
@@ -553,15 +578,57 @@ function renderPartsView() {
         ? `${state.parts.length} item${state.parts.length === 1 ? "" : "s"} on the shelf${low.length ? ` · ${low.length} running low` : ""}.`
         : "";
 
-      listEl.innerHTML = state.parts.length
-        ? `<div class="list">${state.parts.map(partRowHtml).join("")}</div>`
-        : `<p class="empty small">Nothing on the shelf yet. Add the oil, filters and blades you keep
-           around, and they can be booked against a service — which takes them back off the shelf.</p>`;
+      drawParts(listEl, state);
     },
     (err) => {
       listEl.innerHTML = `<p class="empty">Couldn't load the parts list.<br /><span class="hint">${escapeHtml(err.message)}</span></p>`;
     }
   );
+}
+
+// What's already been typed into a field across the shelf, most common first,
+// so "Fram" doesn't become "fram" and "FRAM" on three different rows.
+function usedValues(parts, key) {
+  const counts = new Map();
+  for (const part of parts || []) {
+    const value = String(part[key] || "").trim();
+    if (!value) continue;
+    const seen = counts.get(value.toLowerCase());
+    if (seen) seen.count += 1;
+    else counts.set(value.toLowerCase(), { value, count: 1 });
+  }
+  return [...counts.values()].sort((a, b) => b.count - a.count || a.value.localeCompare(b.value)).map((e) => e.value);
+}
+
+// Grouped by category, since that's what a category is for -- but only once
+// there's more than one to group into. A shelf where nothing has been
+// categorised reads exactly as it always did, one flat list.
+function drawParts(listEl, state) {
+  if (!state.parts.length) {
+    listEl.innerHTML = `<p class="empty small">Nothing on the shelf yet. Add the oil, filters and blades you keep
+      around, and they can be booked against a service — which takes them back off the shelf.</p>`;
+    return;
+  }
+
+  const groups = new Map();
+  for (const part of state.parts) {
+    const key = String(part.category || "").trim() || "";
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(part);
+  }
+
+  const list = (parts) => `<div class="list">${parts.map((part) => partRowHtml(part, state.vehicles)).join("")}</div>`;
+  if (groups.size === 1 && groups.has("")) {
+    listEl.innerHTML = list(state.parts);
+    return;
+  }
+
+  // Named categories first, alphabetically; whatever hasn't been given one
+  // brings up the rear rather than heading the page.
+  const named = [...groups.keys()].filter(Boolean).sort((a, b) => a.localeCompare(b));
+  listEl.innerHTML =
+    named.map((key) => `<div class="section-title">${escapeHtml(key)}</div>${list(groups.get(key))}`).join("") +
+    (groups.has("") ? `<div class="section-title">Uncategorised</div>${list(groups.get(""))}` : "");
 }
 
 function formatQuantity(part) {
@@ -570,7 +637,7 @@ function formatQuantity(part) {
   return `${rounded} ${part.unit || "each"}`;
 }
 
-function partRowHtml(part) {
+function partRowHtml(part, vehicles = []) {
   const low = isLowStock(part);
   // Booking out more than the shelf held leaves a negative count. That's kept
   // rather than clamped -- it means the count was wrong, and hiding it would
@@ -578,6 +645,7 @@ function partRowHtml(part) {
   // "running low".
   const negative = (Number(part.quantity) || 0) < 0;
   const meta = [
+    part.brand || null,
     part.partNumber ? `#${part.partNumber}` : null,
     part.unitCostCents ? `${formatUSD(part.unitCostCents)} each` : null,
     part.minQuantity ? `keep ${part.minQuantity}+` : null,
@@ -585,11 +653,19 @@ function partRowHtml(part) {
     .filter(Boolean)
     .join(" · ");
 
+  // Naming no vehicle means it fits anything, which needs no saying. A vehicle
+  // since deleted is dropped rather than shown as a missing name.
+  const fits = (part.fitsVehicleIds || [])
+    .map((id) => vehicles.find((vehicle) => vehicle.id === id))
+    .filter(Boolean)
+    .map((vehicle) => vehicle.name);
+
   return `
     <div class="row part-row ${negative ? "negative" : low ? "low" : ""} tappable" data-act="edit-part" data-id="${part.id}">
       <div class="row-main">
         <span class="row-title-text">${escapeHtml(part.name)}</span>
         ${meta ? `<span class="row-meta">${escapeHtml(meta)}</span>` : ""}
+        ${fits.length ? `<span class="row-meta fits-line">Fits ${escapeHtml(fits.join(", "))}</span>` : ""}
         ${part.notes ? `<span class="row-note">${escapeHtml(part.notes)}</span>` : ""}
       </div>
       <div class="row-side">
@@ -607,9 +683,9 @@ function partRowHtml(part) {
 function handlePartsAction(action, id, state) {
   switch (action) {
     case "add-part":
-      return openPartForm(null);
+      return openPartForm(null, state);
     case "edit-part":
-      return openPartForm(state.parts.find((part) => part.id === id) || null);
+      return openPartForm(state.parts.find((part) => part.id === id) || null, state);
     case "part-plus":
       return adjustPartQuantity(id, 1);
     case "part-minus":
@@ -625,11 +701,31 @@ function adjustPartQuantity(partId, delta) {
   return updateDoc(doc(db, "parts", partId), { quantity: increment(delta), updatedAt: serverTimestamp() });
 }
 
-async function openPartForm(existing) {
+async function openPartForm(existing, state) {
   const values = await openFormModal({
     title: existing ? "Edit part" : "Add a part",
     fields: [
       { name: "name", label: "Part or supply", type: "text", value: existing?.name || "", placeholder: "Oil filter" },
+      {
+        name: "brand",
+        label: "Brand (optional)",
+        type: "text",
+        half: true,
+        value: existing?.brand || "",
+        placeholder: "Fram",
+        suggestions: usedValues(state.parts, "brand"),
+      },
+      {
+        name: "category",
+        label: "Category (optional)",
+        type: "text",
+        half: true,
+        value: existing?.category || "",
+        placeholder: "Filters",
+        suggestions: [...usedValues(state.parts, "category"), ...PART_CATEGORIES].filter(
+          (value, index, all) => all.findIndex((other) => other.toLowerCase() === value.toLowerCase()) === index
+        ),
+      },
       {
         name: "partNumber",
         label: "Part number (optional)",
@@ -679,7 +775,15 @@ async function openPartForm(existing) {
         value: existing?.unitCostCents ? (existing.unitCostCents / 100).toFixed(2) : "",
         placeholder: "8.99",
       },
-      { name: "notes", label: "Notes (optional)", type: "text", value: existing?.notes || "", placeholder: "Fits the van and the truck" },
+      {
+        name: "fitsVehicleIds",
+        label: "Fits",
+        type: "checks",
+        value: existing?.fitsVehicleIds || [],
+        options: (state.vehicles || []).map((vehicle) => ({ value: vehicle.id, label: vehicle.name })),
+        hint: "Pick none and it counts as fitting anything — which is what a case of oil or a box of rags is.",
+      },
+      { name: "notes", label: "Notes (optional)", type: "text", value: existing?.notes || "", placeholder: "Bought two at a time" },
     ],
     submitLabel: existing ? "Save changes" : "Add it",
     destructive: existing ? { label: "Remove from the parts list" } : null,
@@ -706,6 +810,9 @@ async function openPartForm(existing) {
 
   const payload = {
     name: values.name,
+    brand: values.brand || null,
+    category: values.category || null,
+    fitsVehicleIds: values.fitsVehicleIds || [],
     partNumber: values.partNumber || null,
     unit: values.unit || "each",
     quantity: values.quantity ? Number(values.quantity) : 0,
@@ -1509,6 +1616,7 @@ async function openScheduleServiceForm(state, existing, odometerMiles) {
         type: "parts",
         value: existing?.partsNeeded || [],
         catalogue: state.parts || [],
+        vehicleId: state.id,
         hint: "Nothing leaves the shelf until the job is marked done — this is so you know what to have in.",
       },
       { name: "notes", label: "Notes (optional)", type: "textarea", value: existing?.notes || "" },
@@ -1625,6 +1733,7 @@ async function openCompletedServiceForm(state, existing, odometerMiles, { comple
         // a whole visit starts from what all of its jobs did, added up.
         value: existing?.parts || (completing ? existing?.partsNeeded : null) || (folding ? partsNeededAcross(folding) : null) || [],
         catalogue: state.parts || [],
+        vehicleId: state.id,
         hint: "Anything taken off the shelf comes out of the parts list when this is saved.",
       },
       {

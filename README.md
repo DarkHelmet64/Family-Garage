@@ -456,10 +456,26 @@ can, and it names the fix rather than failing quietly.
 
 **More > 🔩 Parts & supplies** from the garage screen is one shelf for the whole
 household — a case of oil gets used on whichever car needs it, so parts aren't
-filed under a vehicle. Each item has a name, an optional part number, what it's
-counted in (each, qt, set…), how many you have, and optionally what it costs and
-the level to keep it above. Anything at or below that level is flagged as
-running low, and the row has **+** and **−** for a quick recount.
+owned by a vehicle. Each item has a name, and optionally a **brand**, a
+**category**, a part number, what it costs, and the level to keep it above.
+Anything at or below that level is flagged as running low, and the row has **+**
+and **−** for a quick recount. Brands and categories you've already typed are
+offered back as you type, so "Fram" doesn't become "fram" on the next row.
+
+Give things categories and the shelf sorts itself into them, named categories
+first and anything without one at the end. Categorise nothing and it stays the
+one flat list it always was.
+
+### Which vehicles a part fits
+
+**Fits** is a row of chips, one per vehicle. Pick none — the default — and the
+part counts as fitting anything, which is what a case of oil or a box of rags
+is. Pick some and the shelf row says so.
+
+This changes the order of the parts picker on a service sheet, never what's in
+it: parts that fit the vehicle you're logging against come first, the rest
+follow under *for another vehicle*. Nothing is hidden, because a filter bought
+for the van can still be booked against the truck it ended up on.
 
 ### Using parts on a service
 

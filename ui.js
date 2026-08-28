@@ -191,6 +191,12 @@ export function openFormModal({ title, hint, fields, submitLabel = "Save", valid
           values[field.name] = listState.get(field.name).read();
           continue;
         }
+        if (field.type === "checks") {
+          values[field.name] = [...overlay.querySelectorAll(`[data-check="${field.name}"]:checked`)].map(
+            (box) => box.value
+          );
+          continue;
+        }
         const input = overlay.querySelector(`[data-field="${field.name}"]`);
         if (!input) continue;
         values[field.name] = field.type === "checkbox" ? input.checked : input.value.trim();
@@ -294,6 +300,30 @@ function renderField(field) {
       </div>`;
   }
 
+  // Several answers to one question -- which vehicles a part fits, say. Chips
+  // rather than a stack of checkboxes: the whole set has to be readable at a
+  // glance to be worth ticking.
+  if (type === "checks") {
+    const chosen = new Set(Array.isArray(value) ? value : []);
+    return `
+      <div class="field">
+        <label>${escapeHtml(label)}</label>
+        <div class="check-row">
+          ${options
+            .map(
+              (option) => `
+            <label class="check-chip">
+              <input type="checkbox" data-check="${escapeHtml(name)}" value="${escapeHtml(option.value)}"
+                     ${chosen.has(option.value) ? "checked" : ""} />
+              <span>${escapeHtml(option.label)}</span>
+            </label>`
+            )
+            .join("")}
+        </div>
+        ${hintHtml}
+      </div>`;
+  }
+
   if (type === "checkbox") {
     return `
       <label class="field field-check" for="field-${escapeHtml(name)}">
@@ -332,6 +362,25 @@ function renderField(field) {
 // Which parts a job uses, chosen off the shelf. Each row is a part and how many
 // of it; the count of what's actually in stock rides along in the option text
 // and a warning appears under any row asking for more than there is.
+// What a part says it fits decides the order, never what's offered: a filter
+// bought for the van can still be booked against the truck it ended up on.
+// A part naming no vehicle fits anything, which is what a case of oil is.
+function partOptionsHtml(catalogue, selectedId, vehicleId) {
+  const optionHtml = (part) =>
+    `<option value="${escapeHtml(part.id)}" ${part.id === selectedId ? "selected" : ""}>${escapeHtml(part.name)} (${escapeHtml(String(part.quantity ?? 0))} ${escapeHtml(part.unit || "each")})</option>`;
+
+  const fits = (part) => !(part.fitsVehicleIds || []).length || part.fitsVehicleIds.includes(vehicleId);
+  if (!vehicleId) return catalogue.map(optionHtml).join("");
+
+  const forThis = catalogue.filter(fits);
+  const forOthers = catalogue.filter((part) => !fits(part));
+  if (!forOthers.length) return forThis.map(optionHtml).join("");
+
+  return `
+    <optgroup label="Fits this vehicle">${forThis.map(optionHtml).join("")}</optgroup>
+    <optgroup label="For another vehicle">${forOthers.map(optionHtml).join("")}</optgroup>`;
+}
+
 function bindPartsField(overlay, field) {
   const rowsEl = overlay.querySelector(`[data-parts-rows="${field.name}"]`);
   const addButton = overlay.querySelector(`[data-parts-add="${field.name}"]`);
@@ -366,12 +415,7 @@ function bindPartsField(overlay, field) {
           <div class="item-row-top">
             <select data-part-id>
               <option value="">— pick a part —</option>
-              ${catalogue
-                .map(
-                  (part) =>
-                    `<option value="${escapeHtml(part.id)}" ${part.id === row.partId ? "selected" : ""}>${escapeHtml(part.name)} (${escapeHtml(String(part.quantity ?? 0))} ${escapeHtml(part.unit || "each")})</option>`
-                )
-                .join("")}
+              ${partOptionsHtml(catalogue, row.partId, field.vehicleId)}
             </select>
             <input data-part-qty type="number" step="0.01" min="0" inputmode="decimal"
                    placeholder="Qty" value="${escapeHtml(row.quantity)}" />
