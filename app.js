@@ -64,7 +64,6 @@ const vehicleId = params.get("vehicle");
 const isNewVehiclePage = params.has("new");
 const isSchedulePage = params.has("schedule");
 const isPartsPage = params.has("parts");
-const isPlanPage = params.has("plan");
 
 // Common services, offered as a datalist so the same wording gets reused across
 // vehicles instead of "Oil change" / "oil chg" / "Oil".
@@ -96,8 +95,6 @@ function route() {
     renderNewVehicleView();
   } else if (isPartsPage) {
     renderPartsView();
-  } else if (isPlanPage) {
-    renderPlanView();
   } else if (vehicleId && isSchedulePage) {
     renderScheduleView(vehicleId);
   } else if (vehicleId) {
@@ -140,15 +137,27 @@ function renderGarageView() {
   $app.innerHTML = `
     <h1><span class="emoji">🚗</span>Family Garage</h1>
     <div id="vehicle-list"><p class="loading">Loading…</p></div>
+    <section id="coming-up" hidden>
+      <div class="coming-up-head">
+        <h2><span class="emoji">📅</span>Coming up</h2>
+        <div class="window-picker">
+          <button class="secondary small" data-act="window" data-id="6">6 months</button>
+          <button class="secondary small" data-act="window" data-id="12">12 months</button>
+        </div>
+      </div>
+      <div id="coming-up-body"><p class="loading small">Reading the whole garage…</p></div>
+    </section>
     <button class="secondary full-action" id="more-btn">More</button>
   `;
 
   document.getElementById("more-btn").addEventListener("click", openGarageMenu);
+  mountComingUp();
 
   const listEl = document.getElementById("vehicle-list");
   onSnapshot(
     collection(db, "vehicles"),
     (snap) => {
+      document.getElementById("coming-up").hidden = snap.empty;
       if (snap.empty) {
         listEl.innerHTML = `
           <p class="empty">No vehicles yet.</p>
@@ -247,13 +256,11 @@ function openGarageMenu() {
     title: "More",
     options: [
       { value: "new", label: "+ Add a vehicle" },
-      { value: "plan", label: "📅 What's coming up" },
       { value: "parts", label: "🔩 Parts & supplies" },
       { value: "qr", label: "Show QR code" },
     ],
   }).then((choice) => {
     if (choice === "new") location.search = "?new";
-    else if (choice === "plan") location.search = "?plan";
     else if (choice === "parts") location.search = "?parts";
     else if (choice === "qr") openQrModal(siteUrl(), "Scan to open Family Garage");
   });
@@ -262,44 +269,44 @@ function openGarageMenu() {
 // ---------------------------------------------------------------------------
 // What's coming up
 //
-// The one page that looks across the whole garage: everything due in the next
-// six months or year, whether it was booked in or is simply what a vehicle's
-// schedule implies next -- and what it all needs off the shelf, so a Saturday
-// job doesn't stall on a part nobody bought.
+// The part of the dashboard that looks across the whole garage: everything due
+// in the next six months or year, whether it was booked in or is simply what a
+// vehicle's schedule implies next -- and what it all needs off the shelf, so a
+// Saturday job doesn't stall on a part nobody bought.
 //
-// Read once when the page opens rather than watched live: this is something
-// you sit down with, not something that changes while you look at it.
+// It's the one thing on this screen that can't be answered from the vehicle
+// documents alone -- it needs every vehicle's schedule, services and fill-ups --
+// so it's read after the vehicle list has already been asked for rather than
+// ahead of it, and the list paints without waiting on it.
+//
+// Read once when the dashboard opens rather than watched live: navigating away
+// and back reads it again, which is as fresh as this needs to be.
 // ---------------------------------------------------------------------------
 
-function renderPlanView() {
+function mountComingUp() {
   const state = { months: 12, vehicles: [], parts: [], loaded: false };
 
-  $app.innerHTML = `
-    <a class="back-link" href="./">&larr; Garage</a>
-    <h1><span class="emoji">📅</span>Coming up</h1>
-    <div class="window-picker">
-      <button class="secondary small" data-act="window" data-id="6">6 months</button>
-      <button class="secondary small" data-act="window" data-id="12">12 months</button>
-    </div>
-    <div id="plan-body"><p class="loading">Reading the whole garage…</p></div>
-  `;
-
   $app.addEventListener("click", (event) => {
-    const target = event.target.closest("[data-act]");
+    const target = event.target.closest("[data-act=window]");
     if (!target) return;
-    if (target.dataset.act === "window") {
-      state.months = Number(target.dataset.id);
-      renderPlanBody(state);
-    }
+    state.months = Number(target.dataset.id);
+    renderComingUp(state);
   });
 
-  loadGarage().then((loaded) => {
-    Object.assign(state, loaded, { loaded: true });
-    renderPlanBody(state);
-  }).catch(reportActionFailure);
+  loadGarage()
+    .then((loaded) => {
+      Object.assign(state, loaded, { loaded: true });
+      renderComingUp(state);
+    })
+    .catch((err) => {
+      // A dashboard that can't plan is still a usable dashboard, so this says
+      // so in place instead of taking over the screen with an error.
+      document.getElementById("coming-up-body").innerHTML =
+        `<p class="empty small">Couldn't work out what's coming up.<br /><span class="hint">${escapeHtml(err.message)}</span></p>`;
+    });
 }
 
-// Everything the planning page needs, in one pass.
+// Everything the coming-up section needs, in one pass.
 async function loadGarage() {
   const [vehicleSnap, partSnap] = await Promise.all([getDocs(collection(db, "vehicles")), getDocs(collection(db, "parts"))]);
 
@@ -328,8 +335,8 @@ async function loadGarage() {
   return { vehicles, parts: partSnap.docs.map((d) => ({ id: d.id, ...d.data() })) };
 }
 
-function renderPlanBody(state) {
-  const bodyEl = document.getElementById("plan-body");
+function renderComingUp(state) {
+  const bodyEl = document.getElementById("coming-up-body");
   document.querySelectorAll("[data-act=window]").forEach((button) => {
     button.classList.toggle("chosen", Number(button.dataset.id) === state.months);
   });
@@ -359,8 +366,8 @@ function renderPlanBody(state) {
 
   bodyEl.innerHTML = `
     <p class="hint">${dated.length} job${dated.length === 1 ? "" : "s"} due in the next
-    ${state.months} months, across ${state.vehicles.length} vehicle${state.vehicles.length === 1 ? "" : "s"}.
-    Dates worked out from mileage are marked — they follow how each vehicle has actually been driven.</p>
+    ${state.months} months. Dates worked out from mileage are marked — they follow how each
+    vehicle has actually been driven.</p>
 
     ${
       shortages.length

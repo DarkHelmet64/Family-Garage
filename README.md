@@ -12,7 +12,9 @@ home.
 ## How it works
 
 - **Garage** (the site's root URL): every vehicle with its average MPG, its
-  odometer, and a badge when something is **due soon** or **overdue**.
+  odometer, and a badge when something is **due soon** or **overdue** — and
+  below that, **Coming up**: everything due across the whole garage, and what
+  it needs off the shelf. See [What's coming up](#whats-coming-up).
 - **Vehicle page** (`?vehicle=<id>`): average MPG up top with a chart of your
   recent fill-ups, then the numbers that come out of the log (best, worst, cost
   per mile, average price per gallon, total spent on fuel), then service, then
@@ -421,9 +423,10 @@ with one tap.
 
 ## What's coming up
 
-**More > 📅 What's coming up** looks across the whole garage: everything due in
-the next **6 or 12 months**, whether it was booked in or is simply what a
-vehicle's schedule implies next, grouped by month.
+Under the vehicle list on the garage screen, **Coming up** looks across the
+whole garage: everything due in the next **6 or 12 months**, whether it was
+booked in or is simply what a vehicle's schedule implies next, grouped by
+month. It's there as soon as you open the site rather than behind a menu.
 
 A job due on mileage doesn't say *when* — which is the one thing planning needs.
 So mileage is turned into a date using how fast that vehicle has actually been
@@ -435,6 +438,11 @@ far off they are.
 At the top is **To buy** — everything the coming work needs, added up across
 jobs and set against the shelf, so a Saturday oil change doesn't stall on a
 filter nobody bought.
+
+Working this out needs every vehicle's schedule, services and fill-ups, which
+the vehicle list itself doesn't — so it's read after the list has been asked
+for, and the list appears without waiting on it. It's read once when the page
+opens rather than watched live; coming back to the garage reads it again.
 
 ## Security note
 

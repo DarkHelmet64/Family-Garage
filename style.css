@@ -84,6 +84,14 @@ h1 .emoji { margin-right: 6px; }
   line-height: 1.45;
 }
 
+/* Something filling in below content that's already on screen, rather than a
+   whole page waiting. */
+.loading.small {
+  margin: 8px 0 4px;
+  text-align: left;
+  font-size: 0.9rem;
+}
+
 .hint {
   font-size: 0.8rem;
   color: var(--muted);
@@ -1060,10 +1068,33 @@ input[type="file"] {
 
 /* Coming up --------------------------------------------------------------- */
 
+/* Sits under the vehicle list on the dashboard, so it needs a heading of its
+   own and a rule above it to separate the two. */
+#coming-up {
+  margin-top: 28px;
+  padding-top: 20px;
+  border-top: 1px solid var(--border);
+}
+
+.coming-up-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.coming-up-head h2 {
+  font-size: 1.15rem;
+  margin: 0;
+}
+
+.coming-up-head h2 .emoji { margin-right: 6px; }
+
 .window-picker {
   display: flex;
   gap: 8px;
-  margin-bottom: 14px;
 }
 
 .window-picker button.chosen {
