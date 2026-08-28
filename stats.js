@@ -342,7 +342,11 @@ export function isLowStock(part) {
 // two vehicles in the same driveway rarely share a service book.
 // ---------------------------------------------------------------------------
 
-const normalizeJob = (title) => String(title || "").trim().toLowerCase();
+// One job is "the same job" as another when their names match, ignoring case
+// and stray spacing. Exported because the app matches on it too -- deciding
+// whether a schedule entry is already on the service list, and which of
+// those the visit you just logged covered.
+export const normalizeJob = (title) => String(title || "").trim().toLowerCase();
 
 // Every job in a vehicle's history, flattened out of the visits that contain
 // them, so a job done as part of a three-item visit still counts as done.

@@ -48,6 +48,7 @@ import {
   looksDerived,
   undoDerivedTitle,
   scheduleRows,
+  normalizeJob,
   isLowStock,
   upcomingWork,
   partsForecast,
@@ -392,7 +393,8 @@ function renderComingUp(state) {
     ${
       undated.length
         ? `<div class="section-title">When you get there</div>
-           <p class="hint">Due on mileage, with no way to say when yet — log a few fill-ups and these get dates too.</p>
+           <p class="hint">Nothing to date these by yet — one due on mileage needs a few fill-ups to
+           measure against, and one added to the list before it's been logged has no due date at all.</p>
            <div class="list">${undated.map((row) => planRowHtml(row, state.parts)).join("")}</div>`
         : ""
     }
@@ -409,7 +411,7 @@ function planRowHtml(row, parts) {
     ? `${formatISO(row.on, { withYear: "auto" })}${row.projected ? " (estimated)" : ""}`
     : row.dueOdometerMiles !== null
       ? `at ${formatMiles(row.dueOdometerMiles)}${row.milesAway !== null ? ` · ${formatMiles(row.milesAway)} away` : ""}`
-      : "";
+      : "no date set";
 
   const needed = (row.partsNeeded || []).map((need) => {
     const part = parts.find((candidate) => candidate.id === need.partId);
@@ -796,7 +798,7 @@ function vehicleBodyHtml(state) {
   const odometerMiles = currentOdometer(vehicle, state.fillups, state.services);
   const ctx = { odometerMiles, today: new Date(), parts: state.parts || [] };
 
-  const open = state.services.filter((s) => s.status !== "done").sort((a, b) => compareServices(a, b, ctx));
+  const open = openServices(state.services, ctx);
   const history = state.services
     .filter((s) => s.status === "done")
     .sort((a, b) => String(b.servicedOn || "").localeCompare(String(a.servicedOn || "")));
@@ -840,6 +842,11 @@ function vehicleBodyHtml(state) {
         ? `<div class="list">${open.map((s) => serviceRowHtml(s, ctx)).join("")}</div>`
         : `<p class="empty small">Nothing scheduled. Tap <strong>Add service</strong> to book the next oil change or log one you've already had done.</p>`
     }
+    ${
+      open.length > 1
+        ? `<button class="secondary full-action list-action" data-act="log-visit">🔧 Log these as one visit</button>`
+        : ""
+    }
 
     ${
       history.length
@@ -865,6 +872,13 @@ function vehicleBodyHtml(state) {
         : `<p class="empty small">No fill-ups yet. Log one every time you buy gas — MPG appears once you've filled the tank all the way twice.</p>`
     }
   `;
+}
+
+// What's waiting on the service list, most pressing first -- the same order the
+// vehicle page shows, so the visit sheet lists the jobs the way you just read
+// them.
+function openServices(services, ctx) {
+  return services.filter((service) => service.status !== "done").sort((a, b) => compareServices(a, b, ctx));
 }
 
 function statsGridHtml(summary, serviceCostCents) {
@@ -1136,6 +1150,10 @@ function handleVehicleAction(action, id, state) {
       return openFillupForm(state, state.fillups.find((f) => f.id === id) || null);
     case "log-service":
       return openAddServiceMenu(state, odometerMiles);
+    case "log-visit":
+      return openCompletedServiceForm(state, null, odometerMiles, {
+        folding: openServices(state.services, { odometerMiles, today: new Date(), parts: state.parts || [] }),
+      });
     case "edit-service": {
       const service = state.services.find((s) => s.id === id);
       if (!service) return null;
@@ -1452,22 +1470,36 @@ async function openScheduleServiceForm(state, existing, odometerMiles) {
   await recomputeSummary(state.id);
 }
 
-async function openCompletedServiceForm(state, existing, odometerMiles, { completing = false } = {}) {
+// `folding` is a list of scheduled records being logged as one trip to the
+// shop: the sheet opens with a line per job, the parts those jobs said they'd
+// need, and their shop if they all name the same one. The records themselves
+// come off the list once the visit is saved, and only for the jobs that were
+// still on the sheet when it was -- taking a line off is how you say you didn't
+// have that one done after all.
+async function openCompletedServiceForm(state, existing, odometerMiles, { completing = false, folding = null } = {}) {
   const isEditingDone = existing && existing.status === "done";
   const [{ photos: existingPhotos, error: photoError }, shops] = await Promise.all([
     existing ? loadServicePhotos(state.id, existing.id) : { photos: [], error: null },
     knownShops(state),
   ]);
   const values = await openFormModal({
-    title: completing ? "Mark service done" : isEditingDone ? "Edit service record" : "Log completed service",
+    title: folding
+      ? "Log these as one visit"
+      : completing
+        ? "Mark service done"
+        : isEditingDone
+          ? "Edit service record"
+          : "Log completed service",
     fields: [
       {
         name: "items",
         label: "What was done",
         type: "list",
-        value: existing ? serviceItems(existing) : [],
+        value: existing ? serviceItems(existing) : folding ? folding.flatMap((record) => serviceItems(record)) : [],
         suggestions: serviceSuggestions(state),
-        hint: "One trip, several jobs — add a line for each. The total is added up for you.",
+        hint: folding
+          ? "Everything on the service list, as one trip. Put a cost against each job, and take off any line you didn't have done — those stay on the list."
+          : "One trip, several jobs — add a line for each. The total is added up for you.",
       },
       {
         name: "servicedOn",
@@ -1495,7 +1527,7 @@ async function openCompletedServiceForm(state, existing, odometerMiles, { comple
         label: "Shop (optional)",
         type: "text",
         half: true,
-        value: existing?.shop || "",
+        value: existing?.shop || (folding ? sharedShop(folding) : "") || "",
         placeholder: "Dave's Auto",
         suggestions: shops,
       },
@@ -1503,8 +1535,9 @@ async function openCompletedServiceForm(state, existing, odometerMiles, { comple
         name: "partsUsed",
         label: "Parts used (optional)",
         type: "parts",
-        // Marking a scheduled job done starts from the parts it said it needed.
-        value: existing?.parts || (completing ? existing?.partsNeeded : null) || [],
+        // Marking a scheduled job done starts from the parts it said it needed;
+        // a whole visit starts from what all of its jobs did, added up.
+        value: existing?.parts || (completing ? existing?.partsNeeded : null) || (folding ? partsNeededAcross(folding) : null) || [],
         catalogue: state.parts || [],
         hint: "Anything taken off the shelf comes out of the parts list when this is saved.",
       },
@@ -1538,7 +1571,7 @@ async function openCompletedServiceForm(state, existing, odometerMiles, { comple
         placeholder: "6",
       },
     ],
-    submitLabel: completing ? "Mark done" : "Save",
+    submitLabel: folding ? "Log the visit" : completing ? "Mark done" : "Save",
     destructive: isEditingDone ? { label: "Delete this service record" } : null,
     validate: (v) => {
       const named = (v.items || []).filter((item) => item.title);
@@ -1608,6 +1641,17 @@ async function openCompletedServiceForm(state, existing, odometerMiles, { comple
     );
   }
 
+  // The visit is now what says these jobs were done, so their scheduled records
+  // come off the list. Matching is by name, the way the rest of the app decides
+  // two jobs are the same one -- so a line renamed on the sheet leaves its
+  // record behind rather than guessing, which is the harmless way to be wrong.
+  const foldedAway = folding ? folding.filter((record) => saidDone(record, items)) : [];
+  for (const record of foldedAway) {
+    await applyPartUsage(record.parts || [], []);
+    await deleteServicePhotos(state.id, record.id);
+    await deleteDoc(doc(db, "vehicles", state.id, "services", record.id));
+  }
+
   // A repeat interval schedules the next one straight away, which is the whole
   // point of recording "every 5,000 miles" -- otherwise it lives in your head.
   if (repeatMiles || repeatMonths) {
@@ -1626,11 +1670,41 @@ async function openCompletedServiceForm(state, existing, odometerMiles, { comple
       createdAt: serverTimestamp(),
     });
     showToast("Logged — next one scheduled");
+  } else if (folding) {
+    showToast(`Logged ${items.length} job${items.length === 1 ? "" : "s"} as one visit`);
   } else {
     showToast("Service logged");
   }
 
   await recomputeSummary(state.id);
+}
+
+// A shop only carries into the visit if every job on the list agrees on it;
+// two different shops is a question for you, not a guess for the sheet.
+function sharedShop(records) {
+  const named = [...new Set(records.map((record) => record.shop).filter(Boolean))];
+  return named.length === 1 ? named[0] : "";
+}
+
+// What the whole visit needs off the shelf: every job's parts, added up, so two
+// oil changes on one trip ask for both lots of oil rather than one.
+function partsNeededAcross(records) {
+  const merged = new Map();
+  for (const record of records) {
+    for (const need of record.partsNeeded || []) {
+      if (!need.partId) continue;
+      const current = merged.get(need.partId) || { ...need, quantity: 0 };
+      current.quantity += Number(need.quantity) || 0;
+      merged.set(need.partId, current);
+    }
+  }
+  return [...merged.values()];
+}
+
+// Whether a scheduled record's job is among the ones the saved visit covered.
+function saidDone(record, items) {
+  const covered = new Set(items.map((item) => normalizeJob(item.title)));
+  return serviceItems(record).some((item) => item.title && covered.has(normalizeJob(item.title)));
 }
 
 async function deleteService(state, id) {
@@ -1794,6 +1868,7 @@ function renderScheduleView(id) {
 function scheduleBodyHtml(state) {
   const odometerMiles = currentOdometer(state.vehicle, state.fillups, state.services);
   const rows = scheduleRows(state.schedule, state.services, { odometerMiles, today: new Date() });
+  const onTheList = onListTitles(state.services);
 
   return `
     <h1><span class="emoji">🔧</span>Service schedule</h1>
@@ -1803,7 +1878,9 @@ function scheduleBodyHtml(state) {
 
     ${
       rows.length
-        ? `<div class="list schedule-list">${rows.map((row) => scheduleRowHtml(row, odometerMiles)).join("")}</div>`
+        ? `<div class="list schedule-list">${rows
+            .map((row) => scheduleRowHtml(row, odometerMiles, onTheList))
+            .join("")}</div>`
         : `<p class="empty small">Nothing set up yet. Add the jobs this vehicle needs on a
            schedule — an oil change every 5,000 miles, an inspection every year — and this page
            will tell you when each one is next due.</p>`
@@ -1820,7 +1897,7 @@ function intervalText(entry) {
   return parts.join(" or ") || "no interval set";
 }
 
-function scheduleRowHtml(row, odometerMiles) {
+function scheduleRowHtml(row, odometerMiles, onTheList) {
   const lastDone = row.lastDone
     ? `last done ${[
         row.lastDone.servicedOn ? formatISO(row.lastDone.servicedOn) : null,
@@ -1834,7 +1911,15 @@ function scheduleRowHtml(row, odometerMiles) {
     ? ""
     : `<span class="row-meta">next: ${escapeHtml(dueSummary(row, odometerMiles))}</span>`;
 
-  const canSchedule = row.status.key === "overdue" || row.status.key === "soon";
+  // Every job can be added to the list, whether it's overdue or not far off at
+  // all -- you decide what you're doing on Saturday, not the interval. Only the
+  // pressing ones get the green button, so the page still says at a glance
+  // which ones are asking rather than offering.
+  const onList = onTheList.has(normalizeJob(row.title));
+  const pressing = row.status.key === "overdue" || row.status.key === "soon";
+  const action = onList
+    ? `<span class="row-meta on-list">On the list</span>`
+    : `<button class="${pressing ? "approve" : "secondary"} small" data-act="book-plan" data-id="${row.id}">Add to list</button>`;
 
   return `
     <div class="row service-row ${row.status.key} tappable" data-act="edit-plan" data-id="${row.id}">
@@ -1846,10 +1931,18 @@ function scheduleRowHtml(row, odometerMiles) {
       </div>
       <div class="row-side">
         <span class="badge ${row.status.key}">${escapeHtml(row.status.label)}</span>
-        ${canSchedule ? `<button class="approve small" data-act="book-plan" data-id="${row.id}">Add to list</button>` : ""}
+        ${action}
       </div>
     </div>
   `;
+}
+
+// The jobs already waiting on the vehicle's service list, so the schedule can
+// say "on the list" instead of offering to add a second copy.
+function onListTitles(services) {
+  return new Set(
+    (services || []).filter((service) => service.status !== "done").map((service) => normalizeJob(service.title))
+  );
 }
 
 function handleScheduleAction(action, id, state) {
@@ -1940,9 +2033,7 @@ async function bookPlanEntry(state, id) {
     .find((entry) => entry.id === id);
   if (!row) return;
 
-  const alreadyThere = state.services.some(
-    (service) => service.status !== "done" && String(service.title).toLowerCase() === row.title.toLowerCase()
-  );
+  const alreadyThere = onListTitles(state.services).has(normalizeJob(row.title));
   if (alreadyThere) {
     await openAlertModal(`${row.title} is already on the service list.`);
     return;
@@ -2180,7 +2271,7 @@ async function recomputeSummary(id) {
   const { summary } = computeFuelStats(fillups);
   const odometerMiles = currentOdometer(vehicleDoc.data(), fillups, services);
   const ctx = { odometerMiles, today: new Date() };
-  const open = services.filter((s) => s.status !== "done").sort((a, b) => compareServices(a, b, ctx));
+  const open = openServices(services, ctx);
   const next = open[0] || null;
 
   await updateDoc(doc(db, "vehicles", id), {
