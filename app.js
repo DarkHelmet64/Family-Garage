@@ -927,7 +927,7 @@ function vehicleBodyHtml(state) {
       history.length
         ? `<div class="section-title row-title">
              <span>Service history</span>
-             <a class="inline-link" href="#" data-act="toggle-history">${state.showHistory ? "Hide" : `Show (${history.length})`}</a>
+             <button class="secondary small" data-act="toggle-history">${state.showHistory ? "Hide" : `Show (${history.length})`}</button>
            </div>
            ${state.showHistory ? `<div class="list">${history.map((s) => serviceHistoryRowHtml(s)).join("")}</div>` : ""}`
         : ""
@@ -937,9 +937,9 @@ function vehicleBodyHtml(state) {
       <span>Gas log</span>
       ${
         recent.length > 5
-          ? `<a class="inline-link" href="#" data-act="toggle-fillups">${
-              state.showAllFillups ? "Show fewer" : `Show all ${recent.length}`
-            }</a>`
+          ? `<button class="secondary small" data-act="toggle-fillups">${
+              state.showAllFillups ? "Hide" : `Show (${recent.length})`
+            }</button>`
           : ""
       }
     </div>

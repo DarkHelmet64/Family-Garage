@@ -229,15 +229,6 @@ button:disabled { opacity: 0.5; cursor: default; }
   letter-spacing: 0;
 }
 
-.inline-link {
-  color: var(--brand);
-  text-decoration: none;
-  text-transform: none;
-  letter-spacing: 0;
-  font-weight: 600;
-  font-size: 0.85rem;
-}
-
 /* Garage list ------------------------------------------------------------ */
 
 .vehicle-row {
