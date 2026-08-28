@@ -10,10 +10,12 @@ import {
   onSnapshot,
   serverTimestamp,
   writeBatch,
+  increment,
 } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore.js";
 import { firebaseConfig } from "./firebase-config.js";
 
 import {
+  isoToDate,
   formatUSD,
   formatPricePerGallon,
   dollarsToCents,
@@ -46,6 +48,9 @@ import {
   looksDerived,
   undoDerivedTitle,
   scheduleRows,
+  isLowStock,
+  upcomingWork,
+  partsForecast,
   STATS_VERSION,
 } from "./stats.js";
 
@@ -58,6 +63,8 @@ const params = new URLSearchParams(location.search);
 const vehicleId = params.get("vehicle");
 const isNewVehiclePage = params.has("new");
 const isSchedulePage = params.has("schedule");
+const isPartsPage = params.has("parts");
+const isPlanPage = params.has("plan");
 
 // Common services, offered as a datalist so the same wording gets reused across
 // vehicles instead of "Oil change" / "oil chg" / "Oil".
@@ -87,6 +94,10 @@ function route() {
     renderConfigMissing();
   } else if (isNewVehiclePage) {
     renderNewVehicleView();
+  } else if (isPartsPage) {
+    renderPartsView();
+  } else if (isPlanPage) {
+    renderPlanView();
   } else if (vehicleId && isSchedulePage) {
     renderScheduleView(vehicleId);
   } else if (vehicleId) {
@@ -236,12 +247,395 @@ function openGarageMenu() {
     title: "More",
     options: [
       { value: "new", label: "+ Add a vehicle" },
+      { value: "plan", label: "📅 What's coming up" },
+      { value: "parts", label: "🔩 Parts & supplies" },
       { value: "qr", label: "Show QR code" },
     ],
   }).then((choice) => {
     if (choice === "new") location.search = "?new";
+    else if (choice === "plan") location.search = "?plan";
+    else if (choice === "parts") location.search = "?parts";
     else if (choice === "qr") openQrModal(siteUrl(), "Scan to open Family Garage");
   });
+}
+
+// ---------------------------------------------------------------------------
+// What's coming up
+//
+// The one page that looks across the whole garage: everything due in the next
+// six months or year, whether it was booked in or is simply what a vehicle's
+// schedule implies next -- and what it all needs off the shelf, so a Saturday
+// job doesn't stall on a part nobody bought.
+//
+// Read once when the page opens rather than watched live: this is something
+// you sit down with, not something that changes while you look at it.
+// ---------------------------------------------------------------------------
+
+function renderPlanView() {
+  const state = { months: 12, vehicles: [], parts: [], loaded: false };
+
+  $app.innerHTML = `
+    <a class="back-link" href="./">&larr; Garage</a>
+    <h1><span class="emoji">📅</span>Coming up</h1>
+    <div class="window-picker">
+      <button class="secondary small" data-act="window" data-id="6">6 months</button>
+      <button class="secondary small" data-act="window" data-id="12">12 months</button>
+    </div>
+    <div id="plan-body"><p class="loading">Reading the whole garage…</p></div>
+  `;
+
+  $app.addEventListener("click", (event) => {
+    const target = event.target.closest("[data-act]");
+    if (!target) return;
+    if (target.dataset.act === "window") {
+      state.months = Number(target.dataset.id);
+      renderPlanBody(state);
+    }
+  });
+
+  loadGarage().then((loaded) => {
+    Object.assign(state, loaded, { loaded: true });
+    renderPlanBody(state);
+  }).catch(reportActionFailure);
+}
+
+// Everything the planning page needs, in one pass.
+async function loadGarage() {
+  const [vehicleSnap, partSnap] = await Promise.all([getDocs(collection(db, "vehicles")), getDocs(collection(db, "parts"))]);
+
+  const vehicles = await Promise.all(
+    vehicleSnap.docs.map(async (vehicleDoc) => {
+      const id = vehicleDoc.id;
+      const [services, schedule, fillups] = await Promise.all([
+        getDocs(collection(db, "vehicles", id, "services")),
+        getDocs(collection(db, "vehicles", id, "schedule")),
+        getDocs(collection(db, "vehicles", id, "fillups")),
+      ]);
+      const data = vehicleDoc.data();
+      const serviceList = services.docs.map((d) => ({ id: d.id, ...d.data() }));
+      const fillupList = fillups.docs.map((d) => ({ id: d.id, ...d.data() }));
+      return {
+        id,
+        name: data.name,
+        odometerMiles: currentOdometer(data, fillupList, serviceList),
+        services: serviceList,
+        schedule: schedule.docs.map((d) => ({ id: d.id, ...d.data() })),
+        fillups: fillupList,
+      };
+    })
+  );
+
+  return { vehicles, parts: partSnap.docs.map((d) => ({ id: d.id, ...d.data() })) };
+}
+
+function renderPlanBody(state) {
+  const bodyEl = document.getElementById("plan-body");
+  document.querySelectorAll("[data-act=window]").forEach((button) => {
+    button.classList.toggle("chosen", Number(button.dataset.id) === state.months);
+  });
+  if (!state.loaded) return;
+
+  const today = new Date();
+  const { dated, undated } = upcomingWork(state.vehicles, { months: state.months, today });
+  const forecast = partsForecast(dated, state.parts);
+  const shortages = forecast.filter((need) => need.short > 0);
+
+  if (!dated.length && !undated.length) {
+    bodyEl.innerHTML = `<p class="empty small">Nothing due in the next ${state.months} months. Add intervals on a
+      vehicle's <strong>Service schedule</strong>, or book a job in, and it'll show up here.</p>`;
+    return;
+  }
+
+  // Grouped by month, because that's the unit people plan in.
+  let currentMonth = "";
+  const timeline = dated
+    .map((row) => {
+      const month = formatMonth(row.on);
+      const heading = month === currentMonth ? "" : `<div class="section-title">${escapeHtml(month)}</div>`;
+      currentMonth = month;
+      return heading + planRowHtml(row, state.parts);
+    })
+    .join("");
+
+  bodyEl.innerHTML = `
+    <p class="hint">${dated.length} job${dated.length === 1 ? "" : "s"} due in the next
+    ${state.months} months, across ${state.vehicles.length} vehicle${state.vehicles.length === 1 ? "" : "s"}.
+    Dates worked out from mileage are marked — they follow how each vehicle has actually been driven.</p>
+
+    ${
+      shortages.length
+        ? `<div class="card shopping">
+             <div class="section-title">To buy</div>
+             ${shortages
+               .map(
+                 (need) => `<div class="shopping-row">
+                   <span>${escapeHtml(need.name)}</span>
+                   <span class="shopping-need">${need.short} ${escapeHtml(need.unit)} short<span class="muted"> · need ${need.quantity}, have ${need.have}</span></span>
+                 </div>`
+               )
+               .join("")}
+           </div>`
+        : forecast.length
+          ? `<p class="hint ok-line">Everything these jobs need is on the shelf.</p>`
+          : ""
+    }
+
+    ${timeline}
+
+    ${
+      undated.length
+        ? `<div class="section-title">When you get there</div>
+           <p class="hint">Due on mileage, with no way to say when yet — log a few fill-ups and these get dates too.</p>
+           <div class="list">${undated.map((row) => planRowHtml(row, state.parts)).join("")}</div>`
+        : ""
+    }
+  `;
+}
+
+function formatMonth(iso) {
+  const date = isoToDate(iso);
+  return date ? date.toLocaleDateString(undefined, { month: "long", year: "numeric" }) : "";
+}
+
+function planRowHtml(row, parts) {
+  const when = row.on
+    ? `${formatISO(row.on, { withYear: "auto" })}${row.projected ? " (estimated)" : ""}`
+    : row.dueOdometerMiles !== null
+      ? `at ${formatMiles(row.dueOdometerMiles)}${row.milesAway !== null ? ` · ${formatMiles(row.milesAway)} away` : ""}`
+      : "";
+
+  const needed = (row.partsNeeded || []).map((need) => {
+    const part = parts.find((candidate) => candidate.id === need.partId);
+    const have = part ? Number(part.quantity) || 0 : 0;
+    return { ...need, short: have < Number(need.quantity || 0) };
+  });
+
+  return `
+    <div class="row plan-row">
+      <div class="row-main">
+        <span class="row-title-text">${escapeHtml(row.title)}</span>
+        <span class="row-meta">${escapeHtml(row.vehicleName)} · ${escapeHtml(when)}</span>
+        ${
+          needed.length
+            ? `<span class="row-meta parts-line${needed.some((n) => n.short) ? " short" : ""}">Needs ${escapeHtml(
+                needed.map((n) => `${n.quantity} × ${n.name}`).join(", ")
+              )}</span>`
+            : ""
+        }
+      </div>
+      <div class="row-side">
+        <span class="badge ${row.source === "booked" ? "soon" : "scheduled"}">${row.source === "booked" ? "Booked" : "Due"}</span>
+        <a class="ghost btn" href="?vehicle=${encodeURIComponent(row.vehicleId)}">Open</a>
+      </div>
+    </div>
+  `;
+}
+
+// ---------------------------------------------------------------------------
+// Parts and supplies
+//
+// One shelf for the whole garage rather than a list per vehicle: a case of oil
+// or a box of wiper blades gets used on whichever car needs it. Quantities are
+// changed with an atomic increment, never by writing a number worked out from
+// what was read a moment ago, so two phones logging service at once can't undo
+// each other's arithmetic.
+// ---------------------------------------------------------------------------
+
+const PART_UNITS = ["each", "qt", "gal", "L", "oz", "box", "set", "pair", "ft"];
+
+function renderPartsView() {
+  $app.innerHTML = `
+    <a class="back-link" href="./">&larr; Garage</a>
+    <h1><span class="emoji">🔩</span>Parts &amp; supplies</h1>
+    <p class="hint" id="parts-intro"></p>
+    <div id="parts-list"><p class="loading">Loading…</p></div>
+    <button class="secondary full-action" data-act="add-part">+ Add a part</button>
+  `;
+
+  const state = { parts: [] };
+  $app.addEventListener("click", (event) => {
+    const target = event.target.closest("[data-act]");
+    if (!target) return;
+    Promise.resolve(handlePartsAction(target.dataset.act, target.dataset.id, state)).catch(reportActionFailure);
+  });
+
+  const listEl = document.getElementById("parts-list");
+  onSnapshot(
+    collection(db, "parts"),
+    (snap) => {
+      state.parts = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      state.parts.sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")));
+
+      const low = state.parts.filter(isLowStock);
+      document.getElementById("parts-intro").textContent = state.parts.length
+        ? `${state.parts.length} item${state.parts.length === 1 ? "" : "s"} on the shelf${low.length ? ` · ${low.length} running low` : ""}.`
+        : "";
+
+      listEl.innerHTML = state.parts.length
+        ? `<div class="list">${state.parts.map(partRowHtml).join("")}</div>`
+        : `<p class="empty small">Nothing on the shelf yet. Add the oil, filters and blades you keep
+           around, and they can be booked against a service — which takes them back off the shelf.</p>`;
+    },
+    (err) => {
+      listEl.innerHTML = `<p class="empty">Couldn't load the parts list.<br /><span class="hint">${escapeHtml(err.message)}</span></p>`;
+    }
+  );
+}
+
+function formatQuantity(part) {
+  const quantity = Number(part.quantity) || 0;
+  const rounded = Math.round(quantity * 100) / 100;
+  return `${rounded} ${part.unit || "each"}`;
+}
+
+function partRowHtml(part) {
+  const low = isLowStock(part);
+  // Booking out more than the shelf held leaves a negative count. That's kept
+  // rather than clamped -- it means the count was wrong, and hiding it would
+  // lose the only evidence of that -- but it's shown as a discrepancy, not as
+  // "running low".
+  const negative = (Number(part.quantity) || 0) < 0;
+  const meta = [
+    part.partNumber ? `#${part.partNumber}` : null,
+    part.unitCostCents ? `${formatUSD(part.unitCostCents)} each` : null,
+    part.minQuantity ? `keep ${part.minQuantity}+` : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+
+  return `
+    <div class="row part-row ${negative ? "negative" : low ? "low" : ""} tappable" data-act="edit-part" data-id="${part.id}">
+      <div class="row-main">
+        <span class="row-title-text">${escapeHtml(part.name)}</span>
+        ${meta ? `<span class="row-meta">${escapeHtml(meta)}</span>` : ""}
+        ${part.notes ? `<span class="row-note">${escapeHtml(part.notes)}</span>` : ""}
+      </div>
+      <div class="row-side">
+        <span class="part-qty ${negative ? "negative" : low ? "low" : ""}">${escapeHtml(formatQuantity(part))}</span>
+        ${negative ? `<span class="row-meta">more booked out than the shelf held — worth a recount</span>` : ""}
+        <div class="row-actions">
+          <button class="ghost" data-act="part-minus" data-id="${part.id}" title="Take one off the shelf">−</button>
+          <button class="ghost" data-act="part-plus" data-id="${part.id}" title="Put one back">+</button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function handlePartsAction(action, id, state) {
+  switch (action) {
+    case "add-part":
+      return openPartForm(null);
+    case "edit-part":
+      return openPartForm(state.parts.find((part) => part.id === id) || null);
+    case "part-plus":
+      return adjustPartQuantity(id, 1);
+    case "part-minus":
+      return adjustPartQuantity(id, -1);
+    default:
+      return null;
+  }
+}
+
+// A single atomic step, so tapping quickly -- or on two phones at once -- lands
+// every change rather than the last read winning.
+function adjustPartQuantity(partId, delta) {
+  return updateDoc(doc(db, "parts", partId), { quantity: increment(delta), updatedAt: serverTimestamp() });
+}
+
+async function openPartForm(existing) {
+  const values = await openFormModal({
+    title: existing ? "Edit part" : "Add a part",
+    fields: [
+      { name: "name", label: "Part or supply", type: "text", value: existing?.name || "", placeholder: "Oil filter" },
+      {
+        name: "partNumber",
+        label: "Part number (optional)",
+        type: "text",
+        half: true,
+        value: existing?.partNumber || "",
+        placeholder: "PH7317",
+      },
+      {
+        name: "unit",
+        label: "Counted in",
+        type: "select",
+        half: true,
+        value: existing?.unit || "each",
+        options: PART_UNITS.map((unit) => ({ value: unit, label: unit })),
+      },
+      {
+        name: "quantity",
+        label: "On the shelf",
+        type: "number",
+        step: "0.01",
+        inputmode: "decimal",
+        half: true,
+        value: existing ? String(existing.quantity ?? 0) : "",
+        placeholder: "4",
+      },
+      {
+        name: "minQuantity",
+        label: "Tell me below",
+        type: "number",
+        step: "0.01",
+        inputmode: "decimal",
+        min: 0,
+        half: true,
+        value: existing?.minQuantity != null ? String(existing.minQuantity) : "",
+        placeholder: "1",
+        hint: "Flags the item as running low once the shelf drops to this.",
+      },
+      {
+        name: "unitCost",
+        label: "Cost each (optional)",
+        type: "number",
+        step: "0.01",
+        inputmode: "decimal",
+        min: 0,
+        half: true,
+        value: existing?.unitCostCents ? (existing.unitCostCents / 100).toFixed(2) : "",
+        placeholder: "8.99",
+      },
+      { name: "notes", label: "Notes (optional)", type: "text", value: existing?.notes || "", placeholder: "Fits the van and the truck" },
+    ],
+    submitLabel: existing ? "Save changes" : "Add it",
+    destructive: existing ? { label: "Remove from the parts list" } : null,
+    validate: (v) => {
+      if (!v.name) return "What is it called?";
+      if (v.quantity && !Number.isFinite(Number(v.quantity))) return "That quantity doesn't look like a number.";
+      return null;
+    },
+  });
+  if (!values) return;
+
+  if (values.__destructive) {
+    const confirmed = await openConfirmModal({
+      title: "Remove this part?",
+      message: `${existing.name} comes off the parts list. Service records that used it are left as they are.`,
+      confirmLabel: "Remove",
+      danger: true,
+    });
+    if (!confirmed) return;
+    await deleteDoc(doc(db, "parts", existing.id));
+    showToast("Removed");
+    return;
+  }
+
+  const payload = {
+    name: values.name,
+    partNumber: values.partNumber || null,
+    unit: values.unit || "each",
+    quantity: values.quantity ? Number(values.quantity) : 0,
+    minQuantity: values.minQuantity ? Number(values.minQuantity) : null,
+    unitCostCents: values.unitCost ? dollarsToCents(values.unitCost) : null,
+    notes: values.notes || null,
+    updatedAt: serverTimestamp(),
+  };
+
+  if (existing) await updateDoc(doc(db, "parts", existing.id), payload);
+  else await addDoc(collection(db, "parts"), { ...payload, createdAt: serverTimestamp() });
+  showToast(existing ? "Part updated" : "Added to the shelf");
 }
 
 // ---------------------------------------------------------------------------
@@ -329,8 +723,10 @@ function renderVehicleView(id) {
     vehicle: null,
     fillups: null,
     services: null,
-    // Only used to offer better suggestions, so rendering doesn't wait on it.
+    // Only used to offer better suggestions and to stock the parts picker, so
+    // rendering doesn't wait on either.
     schedule: [],
+    parts: [],
     showAllFillups: false,
     showHistory: false,
   };
@@ -368,6 +764,15 @@ function renderVehicleView(id) {
   });
 
   onSnapshot(
+    collection(db, "parts"),
+    (snap) => {
+      state.parts = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      state.parts.sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")));
+    },
+    (err) => console.warn("Couldn't read the parts list", err)
+  );
+
+  onSnapshot(
     collection(db, "vehicles", id, "schedule"),
     (snap) => {
       state.schedule = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
@@ -382,7 +787,7 @@ function vehicleBodyHtml(state) {
   const { vehicle } = state;
   const { entries, summary } = computeFuelStats(state.fillups);
   const odometerMiles = currentOdometer(vehicle, state.fillups, state.services);
-  const ctx = { odometerMiles, today: new Date() };
+  const ctx = { odometerMiles, today: new Date(), parts: state.parts || [] };
 
   const open = state.services.filter((s) => s.status !== "done").sort((a, b) => compareServices(a, b, ctx));
   const history = state.services
@@ -509,6 +914,7 @@ function serviceRowHtml(service, ctx) {
         <span class="row-meta">${escapeHtml(dueSummary(service, ctx.odometerMiles))}</span>
         ${service.shop ? `<span class="row-meta">${escapeHtml(service.shop)}</span>` : ""}
         ${service.notes ? `<span class="row-note">${escapeHtml(service.notes)}</span>` : ""}
+        ${partsNeededHtml(service, ctx.parts)}
         ${photoTagHtml(service)}
       </div>
       <div class="row-side">
@@ -600,6 +1006,24 @@ function repairDerivedTitles(vehicleId, services) {
   }
 }
 
+const partsSummary = (parts) => parts.map((used) => `${used.quantity} × ${used.name}`).join(", ");
+
+// What a booked job still needs off the shelf, and whether it's there. Being
+// short is the thing worth knowing before the day arrives.
+function partsNeededHtml(service, parts = []) {
+  const needed = service.partsNeeded || [];
+  if (!needed.length) return "";
+
+  const short = needed.filter((want) => {
+    const part = parts.find((candidate) => candidate.id === want.partId);
+    return part && (Number(part.quantity) || 0) < Number(want.quantity || 0);
+  });
+
+  return `<span class="row-meta parts-line${short.length ? " short" : ""}">Needs ${escapeHtml(partsSummary(needed))}${
+    short.length ? ` — short of ${escapeHtml(short.map((want) => want.name).join(", "))}` : ""
+  }</span>`;
+}
+
 // A record with receipts says so, without the list having to load any of them.
 function photoTagHtml(service) {
   const count = service.photoCount || 0;
@@ -648,6 +1072,7 @@ function serviceHistoryRowHtml(service) {
         <span class="row-title-text${multiple ? " visit-heading" : ""}">${escapeHtml(heading)}</span>
         ${multiple ? "" : `<span class="row-meta">${escapeHtml(bits.join(" · "))}</span>`}
         ${breakdown}
+        ${(service.parts || []).length ? `<span class="row-meta parts-line">Used ${escapeHtml(partsSummary(service.parts))}</span>` : ""}
         ${photoTagHtml(service)}
       </div>
       <div class="row-side">
@@ -967,6 +1392,14 @@ async function openScheduleServiceForm(state, existing, odometerMiles) {
         placeholder: "Dave's Auto",
         suggestions: await knownShops(state),
       },
+      {
+        name: "partsNeeded",
+        label: "Parts needed (optional)",
+        type: "parts",
+        value: existing?.partsNeeded || [],
+        catalogue: state.parts || [],
+        hint: "Nothing leaves the shelf until the job is marked done — this is so you know what to have in.",
+      },
       { name: "notes", label: "Notes (optional)", type: "textarea", value: existing?.notes || "" },
     ],
     submitLabel: existing ? "Save changes" : "Schedule it",
@@ -991,6 +1424,7 @@ async function openScheduleServiceForm(state, existing, odometerMiles) {
     dueOdometerMiles: values.dueOdometer ? Math.round(Number(values.dueOdometer)) : null,
     shop: values.shop || null,
     notes: values.notes || null,
+    partsNeeded: values.partsNeeded || [],
   };
 
   if (existing) {
@@ -1001,6 +1435,7 @@ async function openScheduleServiceForm(state, existing, odometerMiles) {
       servicedOn: null,
       odometerMiles: null,
       costCents: null,
+      parts: null,
       repeatMiles: null,
       repeatMonths: null,
       createdAt: serverTimestamp(),
@@ -1058,6 +1493,15 @@ async function openCompletedServiceForm(state, existing, odometerMiles, { comple
         suggestions: shops,
       },
       {
+        name: "partsUsed",
+        label: "Parts used (optional)",
+        type: "parts",
+        // Marking a scheduled job done starts from the parts it said it needed.
+        value: existing?.parts || (completing ? existing?.partsNeeded : null) || [],
+        catalogue: state.parts || [],
+        hint: "Anything taken off the shelf comes out of the parts list when this is saved.",
+      },
+      {
         name: "photos",
         label: "Receipt photos (optional)",
         type: "photos",
@@ -1110,6 +1554,7 @@ async function openCompletedServiceForm(state, existing, odometerMiles, { comple
   const repeatMonths = values.repeatMonths ? Math.round(Number(values.repeatMonths)) : null;
 
   const items = (values.items || []).filter((item) => item.title);
+  const partsUsed = values.partsUsed || [];
   const payload = {
     title: visitTitle(items),
     status: "done",
@@ -1127,6 +1572,8 @@ async function openCompletedServiceForm(state, existing, odometerMiles, { comple
     repeatMonths,
     dueOn: null,
     dueOdometerMiles: null,
+    parts: partsUsed,
+    partsNeeded: null,
   };
 
   const services = collection(db, "vehicles", state.id, "services");
@@ -1140,6 +1587,11 @@ async function openCompletedServiceForm(state, existing, odometerMiles, { comple
     // rather than after saving and reopening it.
     serviceId = (await addDoc(services, { ...payload, createdAt: serverTimestamp() })).id;
   }
+  // What was already booked against this record is given back before the new
+  // list is taken off, so editing a saved visit moves the shelf by the
+  // difference rather than charging it twice.
+  await applyPartUsage(existing?.parts || [], partsUsed);
+
   const photoSaveError = await saveServicePhotos(state.id, serviceId, values.photos, {
     hadCount: existingPhotos.length,
   });
@@ -1182,6 +1634,9 @@ async function deleteService(state, id) {
     danger: true,
   });
   if (!ok) return;
+  const removed = state.services.find((service) => service.id === id);
+  // Whatever it took off the shelf goes back on.
+  await applyPartUsage(removed?.parts || [], []);
   await deleteServicePhotos(state.id, id);
   await deleteDoc(doc(db, "vehicles", state.id, "services", id));
   await recomputeSummary(state.id);
@@ -1502,6 +1957,27 @@ async function bookPlanEntry(state, id) {
   });
   await recomputeSummary(state.id);
   showToast(`${row.title} added to the service list`);
+}
+
+// Moves the shelf by the difference between what a record used to book and what
+// it books now. Every change is an atomic increment on its own part document,
+// so nothing here depends on reading a quantity first -- two people logging
+// service at the same time each get their subtraction.
+async function applyPartUsage(before, after) {
+  const deltas = new Map();
+  for (const used of before) deltas.set(used.partId, (deltas.get(used.partId) || 0) + Number(used.quantity || 0));
+  for (const used of after) deltas.set(used.partId, (deltas.get(used.partId) || 0) - Number(used.quantity || 0));
+
+  for (const [partId, delta] of deltas) {
+    if (!partId || !delta) continue;
+    try {
+      await updateDoc(doc(db, "parts", partId), { quantity: increment(delta), updatedAt: serverTimestamp() });
+    } catch (err) {
+      // A part deleted from the list since is the usual reason; the record
+      // still says what it used.
+      console.warn("Couldn't adjust the shelf for a part", partId, err);
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------

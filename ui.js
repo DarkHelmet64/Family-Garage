@@ -168,8 +168,8 @@ export function openFormModal({ title, hint, fields, submitLabel = "Save", valid
     // while the sheet is open.
     const listState = new Map();
     for (const field of fields) {
-      if (field.type !== "list") continue;
-      listState.set(field.name, bindListField(overlay, field));
+      if (field.type === "list") listState.set(field.name, bindListField(overlay, field));
+      if (field.type === "parts") listState.set(field.name, bindPartsField(overlay, field));
     }
 
     // Bound before the Enter-to-submit handler below, so that when the panel is
@@ -187,7 +187,7 @@ export function openFormModal({ title, hint, fields, submitLabel = "Save", valid
           values[field.name] = photoState.get(field.name);
           continue;
         }
-        if (field.type === "list") {
+        if (field.type === "list" || field.type === "parts") {
           values[field.name] = listState.get(field.name).read();
           continue;
         }
@@ -260,6 +260,18 @@ function renderField(field) {
   const shared = `data-field="${escapeHtml(name)}" id="field-${escapeHtml(name)}"`;
   const hintHtml = hint ? `<span class="field-hint">${escapeHtml(hint)}</span>` : "";
 
+  if (type === "parts") {
+    return `
+      <div class="field" data-parts-field="${escapeHtml(name)}">
+        <label>${escapeHtml(label)}</label>
+        <div class="item-list" data-parts-rows="${escapeHtml(name)}"></div>
+        <div class="item-list-foot">
+          <button type="button" class="secondary small" data-parts-add="${escapeHtml(name)}">+ Add part</button>
+        </div>
+        ${hintHtml}
+      </div>`;
+  }
+
   if (type === "list") {
     return `
       <div class="field" data-list-field="${escapeHtml(name)}">
@@ -315,6 +327,102 @@ function renderField(field) {
       ${control}
       ${hintHtml}
     </div>`;
+}
+
+// Which parts a job uses, chosen off the shelf. Each row is a part and how many
+// of it; the count of what's actually in stock rides along in the option text
+// and a warning appears under any row asking for more than there is.
+function bindPartsField(overlay, field) {
+  const rowsEl = overlay.querySelector(`[data-parts-rows="${field.name}"]`);
+  const addButton = overlay.querySelector(`[data-parts-add="${field.name}"]`);
+  const catalogue = field.catalogue || [];
+
+  let rows = (field.value || []).map((used) => ({
+    partId: used.partId || "",
+    quantity: used.quantity != null ? String(used.quantity) : "1",
+  }));
+
+  const sync = () => {
+    rows = [...rowsEl.querySelectorAll("[data-part-row]")].map((row) => ({
+      partId: row.querySelector("[data-part-id]").value,
+      quantity: row.querySelector("[data-part-qty]").value,
+    }));
+  };
+
+  const shortfall = (row) => {
+    const part = catalogue.find((candidate) => candidate.id === row.partId);
+    if (!part) return null;
+    const wanted = Number(row.quantity);
+    const have = Number(part.quantity) || 0;
+    if (!Number.isFinite(wanted) || wanted <= have) return null;
+    return `only ${have} ${part.unit || "each"} on the shelf`;
+  };
+
+  const render = () => {
+    rowsEl.innerHTML = rows
+      .map(
+        (row, index) => `
+        <div class="item-row" data-part-row>
+          <div class="item-row-top">
+            <select data-part-id>
+              <option value="">— pick a part —</option>
+              ${catalogue
+                .map(
+                  (part) =>
+                    `<option value="${escapeHtml(part.id)}" ${part.id === row.partId ? "selected" : ""}>${escapeHtml(part.name)} (${escapeHtml(String(part.quantity ?? 0))} ${escapeHtml(part.unit || "each")})</option>`
+                )
+                .join("")}
+            </select>
+            <input data-part-qty type="number" step="0.01" min="0" inputmode="decimal"
+                   placeholder="Qty" value="${escapeHtml(row.quantity)}" />
+            <button type="button" class="item-remove" data-part-remove="${index}" title="Remove">×</button>
+          </div>
+          ${shortfall(row) ? `<span class="field-hint short">${escapeHtml(shortfall(row))}</span>` : ""}
+        </div>`
+      )
+      .join("");
+
+    rowsEl.querySelectorAll("[data-part-remove]").forEach((button) => {
+      button.addEventListener("click", () => {
+        sync();
+        rows.splice(Number(button.dataset.partRemove), 1);
+        render();
+      });
+    });
+    rowsEl.querySelectorAll("[data-part-id], [data-part-qty]").forEach((control) => {
+      control.addEventListener("change", () => {
+        sync();
+        render();
+      });
+    });
+  };
+
+  addButton.addEventListener("click", () => {
+    sync();
+    rows.push({ partId: "", quantity: "1" });
+    render();
+  });
+
+  render();
+
+  return {
+    read: () => {
+      sync();
+      return rows
+        .filter((row) => row.partId && Number(row.quantity) > 0)
+        .map((row) => {
+          const part = catalogue.find((candidate) => candidate.id === row.partId) || {};
+          return {
+            partId: row.partId,
+            // The name is kept alongside the id so a record still reads
+            // properly if the part is later taken off the list.
+            name: part.name || "Part",
+            unit: part.unit || "each",
+            quantity: Number(row.quantity),
+          };
+        });
+    },
+  };
 }
 
 // A dropdown of things typed before, narrowing as you type.

@@ -5,7 +5,7 @@
 // try out in a console): everything takes plain objects and returns numbers.
 // ---------------------------------------------------------------------------
 
-import { daysUntil, addMonthsISO } from "./format.js";
+import { daysUntil, addMonthsISO, isoToDate } from "./format.js";
 
 // Odometer is the honest ordering key -- someone entering a receipt they found
 // in the glovebox gets slotted into the right place in the sequence regardless
@@ -321,6 +321,14 @@ export function compareServices(a, b, ctx) {
   return String(a.title || "").localeCompare(String(b.title || ""));
 }
 
+// Running low is a shelf at or below the level you said to keep. With no level
+// set, only actually running out counts.
+export function isLowStock(part) {
+  const quantity = Number(part.quantity) || 0;
+  const floor = part.minQuantity == null ? 0 : Number(part.minQuantity);
+  return quantity <= floor;
+}
+
 // ---------------------------------------------------------------------------
 // The service schedule
 //
@@ -402,4 +410,132 @@ export function scheduleRows(schedule, services, { odometerMiles = null, today =
     if (rank[a.status.key] !== rank[b.status.key]) return rank[a.status.key] - rank[b.status.key];
     return String(a.title || "").localeCompare(String(b.title || ""));
   });
+}
+
+// ---------------------------------------------------------------------------
+// What's coming up
+//
+// Two kinds of work land on a calendar: jobs actually booked in, and jobs a
+// vehicle's schedule implies are next. Both can be due on a date, on an
+// odometer reading, or both -- and a mileage on its own says nothing about
+// *when*, which is exactly what planning needs. So mileage is turned into a
+// date using how fast the vehicle has actually been driven.
+// ---------------------------------------------------------------------------
+
+// Miles a day, measured across the whole fill-up history. Needs two readings
+// far enough apart to mean anything; a week of records would swing wildly.
+const MIN_DAYS_FOR_RATE = 21;
+
+export function milesPerDay(fillups) {
+  const sorted = sortFillupsAscending(fillups);
+  if (sorted.length < 2) return null;
+
+  const first = sorted[0];
+  const last = sorted[sorted.length - 1];
+  const miles = last.odometerMiles - first.odometerMiles;
+  const start = isoToDate(first.filledOn);
+  const end = isoToDate(last.filledOn);
+  if (!start || !end || miles <= 0) return null;
+
+  const days = (end - start) / 86400000;
+  if (days < MIN_DAYS_FOR_RATE) return null;
+  return miles / days;
+}
+
+const pad = (n) => String(n).padStart(2, "0");
+
+export function dateAfterDays(days, today = new Date()) {
+  const date = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  date.setDate(date.getDate() + Math.round(days));
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+}
+
+// Everything due within the next `months`, across every vehicle, soonest first.
+// A row that can only be dated by projection says so; one that can't be dated
+// at all is handed back separately rather than being guessed at.
+export function upcomingWork(vehicles, { months = 12, today = new Date() } = {}) {
+  const horizon = addMonthsISO(dateAfterDays(0, today), months);
+  const dated = [];
+  const undated = [];
+
+  for (const vehicle of vehicles) {
+    const services = vehicle.services || [];
+    const odometerMiles = vehicle.odometerMiles ?? null;
+    const rate = milesPerDay(vehicle.fillups || []);
+
+    const rows = [];
+
+    // Booked jobs first; they're a commitment rather than a rule.
+    for (const service of services) {
+      if (service.status === "done") continue;
+      rows.push({
+        source: "booked",
+        id: service.id,
+        title: service.title,
+        dueOn: service.dueOn || null,
+        dueOdometerMiles: service.dueOdometerMiles ?? null,
+        partsNeeded: service.partsNeeded || [],
+      });
+    }
+
+    // Then anything the schedule says is next, unless it's already booked.
+    const booked = new Set(rows.map((row) => String(row.title || "").toLowerCase()));
+    for (const entry of scheduleRows(vehicle.schedule || [], services, { odometerMiles, today })) {
+      if (entry.neverDone || booked.has(String(entry.title || "").toLowerCase())) continue;
+      rows.push({
+        source: "schedule",
+        id: entry.id,
+        title: entry.title,
+        dueOn: entry.dueOn || null,
+        dueOdometerMiles: entry.dueOdometerMiles ?? null,
+        partsNeeded: [],
+      });
+    }
+
+    for (const row of rows) {
+      const milesAway =
+        row.dueOdometerMiles !== null && odometerMiles !== null ? row.dueOdometerMiles - odometerMiles : null;
+      const projectedOn =
+        milesAway !== null && rate ? dateAfterDays(Math.max(0, milesAway) / rate, today) : null;
+
+      // Whichever comes first, as everywhere else in the app.
+      const on = row.dueOn && projectedOn ? (row.dueOn < projectedOn ? row.dueOn : projectedOn) : row.dueOn || projectedOn;
+
+      const entry = {
+        ...row,
+        vehicleId: vehicle.id,
+        vehicleName: vehicle.name,
+        milesAway,
+        on,
+        projected: !!on && on === projectedOn && !(row.dueOn && row.dueOn <= projectedOn),
+      };
+
+      if (!on) undated.push(entry);
+      else if (on <= horizon) dated.push(entry);
+    }
+  }
+
+  dated.sort((a, b) => String(a.on).localeCompare(String(b.on)) || String(a.vehicleName).localeCompare(String(b.vehicleName)));
+  undated.sort((a, b) => (a.milesAway ?? Infinity) - (b.milesAway ?? Infinity));
+  return { horizon, dated, undated };
+}
+
+// Everything the coming work asks for, against what's on the shelf.
+export function partsForecast(rows, parts) {
+  const wanted = new Map();
+  for (const row of rows) {
+    for (const need of row.partsNeeded || []) {
+      const current = wanted.get(need.partId) || { partId: need.partId, name: need.name, unit: need.unit, quantity: 0 };
+      current.quantity += Number(need.quantity) || 0;
+      wanted.set(need.partId, current);
+    }
+  }
+
+  return [...wanted.values()]
+    .map((need) => {
+      const part = parts.find((candidate) => candidate.id === need.partId);
+      const have = part ? Number(part.quantity) || 0 : 0;
+      return { ...need, have, short: Math.max(0, need.quantity - have), unit: need.unit || (part && part.unit) || "each" };
+    })
+    .sort((a, b) => b.short - a.short || String(a.name).localeCompare(String(b.name)));
 }

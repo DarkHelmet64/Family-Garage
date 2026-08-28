@@ -386,6 +386,56 @@ into Firebase console > Firestore Database > Rules and Publish.** The app says
 as much when it hits a refusal — the record still opens and still saves what it
 can, and it names the fix rather than failing quietly.
 
+## Parts and supplies
+
+**More > 🔩 Parts & supplies** from the garage screen is one shelf for the whole
+household — a case of oil gets used on whichever car needs it, so parts aren't
+filed under a vehicle. Each item has a name, an optional part number, what it's
+counted in (each, qt, set…), how many you have, and optionally what it costs and
+the level to keep it above. Anything at or below that level is flagged as
+running low, and the row has **+** and **−** for a quick recount.
+
+### Using parts on a service
+
+The completed-service sheet has **Parts used**: pick an item and how many. What
+you take comes off the shelf when the record saves, and the option text shows
+what's there, with a warning under any row asking for more than there is.
+
+Edits move the shelf by the *difference*, not by the whole amount again — change
+5 quarts to 6 and one more quart comes off. Deleting a record puts everything it
+used back. Quantities change by an atomic increment rather than by writing a
+number worked out a moment earlier, so two phones logging service at once can't
+undo each other's arithmetic.
+
+Booking out more than you had leaves a negative count. That's kept rather than
+quietly clamped — it means the count was wrong, and the row says so — and a
+recount puts it right.
+
+### Saying what a scheduled job needs
+
+The scheduled-service sheet has **Parts needed**, which is the same picker
+without the subtraction: nothing leaves the shelf until the job is marked done.
+The job then shows what it needs in the service list, in amber when the shelf
+can't cover it, and **Mark done** starts from that list so the parts come across
+with one tap.
+
+## What's coming up
+
+**More > 📅 What's coming up** looks across the whole garage: everything due in
+the next **6 or 12 months**, whether it was booked in or is simply what a
+vehicle's schedule implies next, grouped by month.
+
+A job due on mileage doesn't say *when* — which is the one thing planning needs.
+So mileage is turned into a date using how fast that vehicle has actually been
+driven, measured across its fill-up history. Those dates are marked
+**(estimated)**. A vehicle without enough fill-ups to measure gets no guess:
+its mileage-only jobs are listed separately under "when you get there", with how
+far off they are.
+
+At the top is **To buy** — everything the coming work needs, added up across
+jobs and set against the shelf, so a Saturday oil change doesn't stall on a
+filter nobody bought.
+
 ## Security note
 
 This app has no server of its own — it's static files talking directly to
@@ -418,6 +468,7 @@ Then open the printed URL. Firestore reads/writes will work as soon as
 | `stats.js` | The MPG, service-due and schedule math, kept free of Firestore and the DOM. |
 | `import.js` | Reading fill-ups or service records out of a spreadsheet: matching columns, checking rows, and the preview before anything is saved. One flow, with a profile per record type. |
 | `photos.js` | Shrinking a photographed receipt down to something that fits beside its record. |
+| — | The parts shelf, what a job uses, and the look-ahead all live in `app.js` and `stats.js` alongside the rest. |
 | `xlsx.js` | A small .xlsx reader — unzips the file and pulls values out of the sheet XML, with no library. |
 | `csv.js` | A CSV reader, for the "just export it as CSV" path. |
 | `format.js` | Formatting money, miles, gallons, and dates. |

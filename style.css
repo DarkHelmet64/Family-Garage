@@ -131,7 +131,8 @@ button.secondary {
   border: 1px solid var(--brand);
 }
 
-button.ghost {
+/* Also applies to links styled as buttons, like "Open" on a planning row. */
+button.ghost, a.btn.ghost {
   background: transparent;
   color: var(--muted);
   border: 1px solid var(--border);
@@ -1011,3 +1012,103 @@ input[type="file"] {
 }
 
 .row-title-text.visit-heading + .item-breakdown { margin-top: 8px; }
+
+/* Parts and supplies ------------------------------------------------------ */
+
+.part-row.low {
+  box-shadow: inset 4px 0 0 var(--amber);
+  border-color: var(--amber-border);
+  background: var(--amber-bg);
+  padding-left: 16px;
+}
+
+.part-qty {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.part-qty.low { color: var(--amber); }
+
+/* Wide enough to hit with a thumb, since these get tapped repeatedly. */
+.part-row .row-actions button {
+  min-width: 38px;
+  font-size: 1rem;
+  line-height: 1;
+  padding: 6px 10px;
+}
+
+/* Parts on a service record ----------------------------------------------- */
+
+.parts-line { font-style: italic; }
+.parts-line.short { color: var(--amber); font-style: normal; font-weight: 600; }
+
+/* Under a row in the parts picker, when the shelf can't cover it. */
+.field-hint.short { color: var(--amber); }
+
+.item-row select[data-part-id] { flex: 1 1 auto; min-width: 0; }
+.item-row input[data-part-qty] { flex: 0 0 78px; }
+
+.part-row.negative {
+  box-shadow: inset 4px 0 0 var(--red);
+  border-color: var(--red-border);
+  background: var(--red-bg);
+  padding-left: 16px;
+}
+
+.part-qty.negative { color: var(--red); }
+
+/* Coming up --------------------------------------------------------------- */
+
+.window-picker {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.window-picker button.chosen {
+  background: var(--brand);
+  color: white;
+  border-color: var(--brand);
+}
+
+.plan-row { margin-bottom: 8px; }
+
+.plan-row .row-side {
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.plan-row .btn.ghost {
+  font-size: 0.8rem;
+  padding: 5px 10px;
+  font-weight: 500;
+}
+
+/* The shopping list is the point of the page, so it sits above the timeline
+   and reads as a list of decisions rather than a table. */
+.card.shopping { padding: 14px 16px; }
+.card.shopping .section-title { margin: 0 0 8px; }
+
+.shopping-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.9rem;
+}
+
+.shopping-row:last-child { border-bottom: none; }
+
+.shopping-need {
+  color: var(--amber);
+  font-weight: 700;
+  white-space: nowrap;
+  font-size: 0.82rem;
+}
+
+.shopping-need .muted { font-weight: 400; }
+
+.ok-line { color: var(--green); }
