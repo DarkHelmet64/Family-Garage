@@ -15,10 +15,12 @@ home.
   odometer, and a badge when something is **due soon** or **overdue** — and
   below that, **Coming up**: everything due across the whole garage, and what
   it needs off the shelf. See [What's coming up](#whats-coming-up).
-- Each screen's actions sit at the top of what they act on rather than under
-  it: **More** beside the garage heading, and a section's own action on its
-  heading — **Log as one visit** on Service, **Show all** on the gas log. A
-  list growing longer never pushes its own control further down the page.
+- Every action sits at the top of what it acts on rather than under it: a
+  page's own action beside its heading (**More** on the garage, **+ Add a
+  service** on the schedule, **+ Add a part** on the shelf), and a section's on
+  its section heading (**Log as one visit** on Service, **Show all** on the gas
+  log). A list growing longer never pushes its own control further down the
+  page.
 - **Vehicle page** (`?vehicle=<id>`): average MPG up top with a chart of your
   recent fill-ups, then the numbers that come out of the log (best, worst, cost
   per mile, average price per gallon, total spent on fuel), then service, then

@@ -502,10 +502,12 @@ const PART_UNITS = ["each", "qt", "gal", "L", "oz", "box", "set", "pair", "ft"];
 function renderPartsView() {
   $app.innerHTML = `
     <a class="back-link" href="./">&larr; Garage</a>
-    <h1><span class="emoji">🔩</span>Parts &amp; supplies</h1>
+    <div class="page-head">
+      <h1><span class="emoji">🔩</span>Parts &amp; supplies</h1>
+      <button class="ghost" data-act="add-part">+ Add a part</button>
+    </div>
     <p class="hint" id="parts-intro"></p>
     <div id="parts-list"><p class="loading">Loading…</p></div>
-    <button class="secondary full-action" data-act="add-part">+ Add a part</button>
   `;
 
   const state = { parts: [] };
@@ -1922,7 +1924,10 @@ function scheduleBodyHtml(state) {
   const onTheList = onListTitles(state.services);
 
   return `
-    <h1><span class="emoji">🔧</span>Service schedule</h1>
+    <div class="page-head">
+      <h1><span class="emoji">🔧</span>Service schedule</h1>
+      <button class="ghost" data-act="add-plan">+ Add a service</button>
+    </div>
     <p class="hint">${escapeHtml(state.vehicle.name)} · ${formatMiles(odometerMiles)} on the odometer.
     How often each job comes round, and when it's next needed. Worked out from what you've
     logged, so it moves on its own as you log more.</p>
@@ -1936,8 +1941,6 @@ function scheduleBodyHtml(state) {
            schedule — an oil change every 5,000 miles, an inspection every year — and this page
            will tell you when each one is next due.</p>`
     }
-
-    <button class="secondary full-action" data-act="add-plan">+ Add a service</button>
   `;
 }
 

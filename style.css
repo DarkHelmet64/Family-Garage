@@ -76,6 +76,9 @@ h1 {
   align-items: center;
   justify-content: space-between;
   gap: 10px;
+  /* A long heading and a long action won't share a narrow screen; the action
+     drops beneath rather than squeezing the title into two lines. */
+  flex-wrap: wrap;
   margin-bottom: 20px;
 }
 
