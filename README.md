@@ -356,11 +356,33 @@ needed:
 > last done Aug 27, 2026 at 52,400 mi
 > next: due Feb 27, 2027 (in 184 days) · due at 57,400 mi (5,000 mi away)
 
-Overdue first, then due soon, then anything you've never logged (there's nothing
-to count from until you do — the first one you log starts the clock), then the
-rest. Nothing here is stored as a reminder: the next-due figures are worked out
-from your history every time the page opens, so **logging a service moves them
-on its own**. Shorten an interval and every date recalculates on the spot.
+Overdue first, then due soon, then the rest. Nothing here is stored as a
+reminder: the next-due figures are worked out from your history every time the
+page opens, so **logging a service moves them on its own**. Shorten an interval
+and every date recalculates on the spot.
+
+### A job you've never logged
+
+There's no last-done to count from, so the vehicle's own beginning stands in:
+**zero miles, on January 1st of its model year**. A cabin filter due every 12
+months, never logged, on a 2016 car was due in January 2017 — so that's what the
+row says, and it reads as overdue, which it is.
+
+> **Cabin air filter** — every 12 months
+> never logged — counting from new, Jan 1, 2016 at 0 mi
+> next: due Jan 1, 2017 (3,526 days ago)
+
+The row says what it counted from, because a figure worked out from the
+vehicle's age is an assumption and one measured from a service you logged isn't.
+Log the job once and the assumption is gone — the real date takes over.
+
+A vehicle with **no model year** has no such date to fall back on. Those entries
+stay as they were: "not logged yet", with no next-due, until you log one.
+
+These jobs stay out of [What's coming up](#whats-coming-up) even so. That
+timeline is the work actually ahead, and on an older vehicle a date assumed from
+its model year lands years in the past — enough of them would head the page with
+ancient months. **Add to list** is how one joins the plan.
 
 A job done as part of a multi-item visit counts — if your February trip covered
 an oil change, an air filter and brake pads, all three have their own last-done

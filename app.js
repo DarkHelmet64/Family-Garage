@@ -339,6 +339,7 @@ async function loadGarage() {
       return {
         id,
         name: data.name,
+        year: data.year ?? null,
         odometerMiles: currentOdometer(data, fillupList, serviceList),
         services: serviceList,
         schedule: schedule.docs.map((d) => ({ id: d.id, ...d.data() })),
@@ -364,6 +365,7 @@ async function bookRowFromGarage(state, vehicleId, entryId) {
   const entry = scheduleRows(vehicle.schedule || [], vehicle.services || [], {
     odometerMiles: vehicle.odometerMiles ?? null,
     today: new Date(),
+    vehicleYear: vehicle.year,
   }).find((row) => row.id === entryId);
   if (!entry) return;
 
@@ -1920,7 +1922,11 @@ function renderScheduleView(id) {
 
 function scheduleBodyHtml(state) {
   const odometerMiles = currentOdometer(state.vehicle, state.fillups, state.services);
-  const rows = scheduleRows(state.schedule, state.services, { odometerMiles, today: new Date() });
+  const rows = scheduleRows(state.schedule, state.services, {
+    odometerMiles,
+    today: new Date(),
+    vehicleYear: state.vehicle.year,
+  });
   const onTheList = onListTitles(state.services);
 
   return `
@@ -1959,11 +1965,16 @@ function scheduleRowHtml(row, odometerMiles, onTheList) {
       ]
         .filter(Boolean)
         .join(" ")}`
-    : "never logged — the first one you log starts the clock";
+    : row.countedFrom
+      ? `never logged — counting from new, ${formatISO(row.countedFrom.servicedOn)} at ${formatMiles(row.countedFrom.odometerMiles)}`
+      : "never logged — the first one you log starts the clock";
 
-  const next = row.neverDone
-    ? ""
-    : `<span class="row-meta">next: ${escapeHtml(dueSummary(row, odometerMiles))}</span>`;
+  // Only an entry with nothing to count from at all -- nothing logged and no
+  // model year -- has no next-due to show.
+  const next =
+    row.status.key === "unknown"
+      ? ""
+      : `<span class="row-meta">next: ${escapeHtml(dueSummary(row, odometerMiles))}</span>`;
 
   // Every job can be added to the list, whether it's overdue or not far off at
   // all -- you decide what you're doing on Saturday, not the interval. Only the
@@ -2118,8 +2129,11 @@ async function bookScheduleEntry(vehicleId, entry, services) {
 
 async function bookPlanEntry(state, id) {
   const odometerMiles = currentOdometer(state.vehicle, state.fillups, state.services);
-  const row = scheduleRows(state.schedule, state.services, { odometerMiles, today: new Date() })
-    .find((entry) => entry.id === id);
+  const row = scheduleRows(state.schedule, state.services, {
+    odometerMiles,
+    today: new Date(),
+    vehicleYear: state.vehicle.year,
+  }).find((entry) => entry.id === id);
   if (!row) return;
   await bookScheduleEntry(state.id, row, state.services);
 }

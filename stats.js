@@ -383,29 +383,50 @@ export function lastDoneFor(title, services) {
   })[matches.length - 1];
 }
 
-// When an entry is next needed: the last time it was done plus its interval.
-// With no history there's nothing to measure from, so it reads as due now --
-// the first time you log one, the clock starts.
-export function nextDueFor(entry, lastDone) {
-  if (!lastDone) return { dueOn: null, dueOdometerMiles: null, neverDone: true };
+// What stands in for a job that has never been logged: the vehicle as it left
+// the factory -- zero miles, on January 1st of its model year. Every interval
+// then has something to count from, so a job never logged on a 2016 car reads
+// as long overdue rather than as a blank the page can say nothing about.
+//
+// A vehicle with no model year has no such date. Those entries stay
+// unmeasurable and say so, rather than counting from a year invented for them.
+export function vehicleStartBaseline(vehicleYear) {
+  const year = Number(vehicleYear);
+  if (!Number.isInteger(year) || year < 1000 || year > 9999) return null;
+  return { servicedOn: `${year}-01-01`, odometerMiles: 0 };
+}
+
+// When an entry is next needed: the last time it was done plus its interval --
+// or, with nothing logged, the same interval measured from the vehicle's own
+// beginning.
+export function nextDueFor(entry, lastDone, { vehicleYear = null } = {}) {
+  const from = lastDone || vehicleStartBaseline(vehicleYear);
+  if (!from) return { dueOn: null, dueOdometerMiles: null, neverDone: true, countedFrom: null };
   return {
-    dueOn: entry.everyMonths && lastDone.servicedOn ? addMonthsISO(lastDone.servicedOn, entry.everyMonths) : null,
+    dueOn: entry.everyMonths && from.servicedOn ? addMonthsISO(from.servicedOn, entry.everyMonths) : null,
     dueOdometerMiles:
-      entry.everyMiles && lastDone.odometerMiles !== null ? lastDone.odometerMiles + entry.everyMiles : null,
-    neverDone: false,
+      entry.everyMiles && from.odometerMiles !== null ? from.odometerMiles + entry.everyMiles : null,
+    neverDone: !lastDone,
+    // Set only when the figures came from the vehicle's age rather than from
+    // something logged, so the page can say where they came from -- the
+    // difference between a measurement and an assumption is worth showing.
+    countedFrom: lastDone ? null : from,
   };
 }
 
 // The whole page in one call: each entry with when it was last done, when it's
 // next needed, and how urgent that is -- most pressing first.
-export function scheduleRows(schedule, services, { odometerMiles = null, today = new Date() } = {}) {
+export function scheduleRows(schedule, services, { odometerMiles = null, today = new Date(), vehicleYear = null } = {}) {
   const rows = schedule.map((entry) => {
     const lastDone = lastDoneFor(entry.title, services);
-    const due = nextDueFor(entry, lastDone);
-    const status = due.neverDone
-      ? { key: "unknown", label: "Not logged yet" }
-      : serviceStatus({ status: "scheduled", dueOn: due.dueOn, dueOdometerMiles: due.dueOdometerMiles },
-          { odometerMiles, today });
+    const due = nextDueFor(entry, lastDone, { vehicleYear });
+    // Nothing logged *and* no model year to fall back on is the only case left
+    // that can't say when a job is next needed.
+    const status =
+      due.dueOn === null && due.dueOdometerMiles === null
+        ? { key: "unknown", label: "Not logged yet" }
+        : serviceStatus({ status: "scheduled", dueOn: due.dueOn, dueOdometerMiles: due.dueOdometerMiles },
+            { odometerMiles, today });
     return { ...entry, lastDone, ...due, status };
   });
 
@@ -483,8 +504,19 @@ export function upcomingWork(vehicles, { months = 12, today = new Date() } = {})
     }
 
     // Then anything the schedule says is next, unless it's already booked.
+    //
+    // A job never logged is left out even though the schedule can now date it
+    // from the vehicle's age: that date is an assumption, and on an older
+    // vehicle it lands years in the past, which would head this timeline with
+    // ancient months instead of the work actually ahead. The schedule page
+    // shows it, says what it counted from, and "Add to list" is how one joins
+    // the plan.
     const booked = new Set(rows.map((row) => normalizeJob(row.title)));
-    for (const entry of scheduleRows(vehicle.schedule || [], services, { odometerMiles, today })) {
+    for (const entry of scheduleRows(vehicle.schedule || [], services, {
+      odometerMiles,
+      today,
+      vehicleYear: vehicle.year ?? null,
+    })) {
       if (entry.neverDone || booked.has(normalizeJob(entry.title))) continue;
       rows.push({
         source: "schedule",
