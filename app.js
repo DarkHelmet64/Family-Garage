@@ -911,16 +911,21 @@ function vehicleBodyHtml(state) {
 
     <div class="section-title row-title">
       <span>Service</span>
-      ${
-        open.length > 1
-          ? `<button class="secondary small" data-act="log-visit">Log as one visit</button>`
-          : ""
-      }
+      <div class="heading-actions">
+        ${
+          open.length > 1
+            ? `<button class="secondary small" data-act="log-visit">Log as one visit</button>`
+            : ""
+        }
+        <button class="secondary small" data-act="add-service">+ Add</button>
+      </div>
     </div>
     ${
       open.length
         ? `<div class="list">${open.map((s) => serviceRowHtml(s, ctx)).join("")}</div>`
-        : `<p class="empty small">Nothing scheduled. Tap <strong>Add service</strong> to book the next oil change or log one you've already had done.</p>`
+        : `<p class="empty small">Nothing waiting. <strong>+ Add</strong> puts a job on the list — one the
+           schedule doesn't cover, or anything you've decided needs doing — and <strong>Add service</strong>
+           above logs one you've already had done.</p>`
     }
 
     ${
@@ -1227,6 +1232,10 @@ function handleVehicleAction(action, id, state) {
       return openFillupForm(state, state.fillups.find((f) => f.id === id) || null);
     case "log-service":
       return openAddServiceMenu(state, odometerMiles);
+    // Straight to the sheet rather than through the menu: a job you've decided
+    // on doesn't need to be asked whether it's already been done.
+    case "add-service":
+      return openScheduleServiceForm(state, null, odometerMiles);
     case "log-visit":
       return openCompletedServiceForm(state, null, odometerMiles, {
         folding: openServices(state.services, { odometerMiles, today: new Date(), parts: state.parts || [] }),
