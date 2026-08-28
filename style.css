@@ -1121,6 +1121,14 @@ input[type="file"] {
   gap: 8px;
 }
 
+/* Side by side, so a row offering both stays as short as one offering only
+   "Open" -- there's little enough in a plan row's main column as it is. */
+.plan-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .plan-row .btn.ghost {
   font-size: 0.8rem;
   padding: 5px 10px;

@@ -466,6 +466,13 @@ At the top is **To buy** — everything the coming work needs, added up across
 jobs and set against the shelf, so a Saturday oil change doesn't stall on a
 filter nobody bought.
 
+A row badged **Due** is one a vehicle's schedule merely implies is next, and it
+carries its own **Add to list** — the same button the schedule page offers, so
+you can commit to a job from the garage screen without opening the vehicle
+first. It writes the same record either way, repeat intervals included. Rows
+badged **Booked** are already on a list, which is what the badge says, so they
+have nothing to add.
+
 Working this out needs every vehicle's schedule, services and fill-ups, which
 the vehicle list itself doesn't — so it's read after the list has been asked
 for, and the list appears without waiting on it. It's read once when the page

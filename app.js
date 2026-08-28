@@ -288,10 +288,22 @@ function mountComingUp() {
   const state = { months: 12, vehicles: [], parts: [], loaded: false };
 
   $app.addEventListener("click", (event) => {
-    const target = event.target.closest("[data-act=window]");
+    const target = event.target.closest("[data-act]");
     if (!target) return;
-    state.months = Number(target.dataset.id);
-    renderComingUp(state);
+    if (target.dataset.act === "window") {
+      state.months = Number(target.dataset.id);
+      renderComingUp(state);
+    } else if (target.dataset.act === "book-row") {
+      // Disabled until the write lands, so a second tap can't book it twice.
+      // Re-enabled either way: on success the redraw has replaced this button
+      // anyway, and on failure it's the one you'd want to try again.
+      target.disabled = true;
+      Promise.resolve(bookRowFromGarage(state, target.dataset.vehicle, target.dataset.id))
+        .catch(reportActionFailure)
+        .finally(() => {
+          target.disabled = false;
+        });
+    }
   });
 
   loadGarage()
@@ -334,6 +346,29 @@ async function loadGarage() {
   );
 
   return { vehicles, parts: partSnap.docs.map((d) => ({ id: d.id, ...d.data() })) };
+}
+
+// The look-ahead is read once when the dashboard opens rather than watched, so
+// the row it just booked is moved in that copy and the section redrawn --
+// cheaper than reading the whole garage again, and it lands in the same place
+// the next open would put it: off the schedule's side and onto the vehicle's.
+async function bookRowFromGarage(state, vehicleId, entryId) {
+  const vehicle = state.vehicles.find((candidate) => candidate.id === vehicleId);
+  if (!vehicle) return;
+
+  // Worked out from the vehicle's own schedule rather than from the row, so
+  // this writes exactly what the schedule page would write -- the repeat
+  // intervals included, which the look-ahead row doesn't carry.
+  const entry = scheduleRows(vehicle.schedule || [], vehicle.services || [], {
+    odometerMiles: vehicle.odometerMiles ?? null,
+    today: new Date(),
+  }).find((row) => row.id === entryId);
+  if (!entry) return;
+
+  const added = await bookScheduleEntry(vehicleId, entry, vehicle.services || []);
+  if (!added) return;
+  vehicle.services = [...(vehicle.services || []), added];
+  renderComingUp(state);
 }
 
 function renderComingUp(state) {
@@ -434,7 +469,17 @@ function planRowHtml(row, parts) {
       </div>
       <div class="row-side">
         <span class="badge ${row.source === "booked" ? "soon" : "scheduled"}">${row.source === "booked" ? "Booked" : "Due"}</span>
-        <a class="ghost btn" href="?vehicle=${encodeURIComponent(row.vehicleId)}">Open</a>
+        <div class="plan-actions">
+          ${
+            // A booked row is already on its vehicle's list -- that's what the
+            // badge says. Only what the schedule merely implies can be added.
+            row.source === "booked"
+              ? ""
+              : `<button class="secondary small" data-act="book-row" data-vehicle="${escapeHtml(row.vehicleId)}"
+                         data-id="${escapeHtml(row.id)}">Add to list</button>`
+          }
+          <a class="ghost btn" href="?vehicle=${encodeURIComponent(row.vehicleId)}">Open</a>
+        </div>
       </div>
     </div>
   `;
@@ -2027,34 +2072,47 @@ async function openPlanForm(state, existing) {
 
 // Turns a due entry into a real scheduled job, so it appears in the vehicle's
 // service list and on the garage badge alongside anything booked in by hand.
-async function bookPlanEntry(state, id) {
-  const odometerMiles = currentOdometer(state.vehicle, state.fillups, state.services);
-  const row = scheduleRows(state.schedule, state.services, { odometerMiles, today: new Date() })
-    .find((entry) => entry.id === id);
-  if (!row) return;
-
-  const alreadyThere = onListTitles(state.services).has(normalizeJob(row.title));
-  if (alreadyThere) {
-    await openAlertModal(`${row.title} is already on the service list.`);
-    return;
+// Written once and called from both places that offer it -- the vehicle's own
+// schedule page and the garage screen's look-ahead -- so the same tap on either
+// leaves the same record behind.
+//
+// Hands back what it wrote, so a caller holding its own copy of the garage can
+// move the row across without reading it all again.
+async function bookScheduleEntry(vehicleId, entry, services) {
+  if (onListTitles(services).has(normalizeJob(entry.title))) {
+    await openAlertModal(`${entry.title} is already on the service list.`);
+    return null;
   }
 
-  await addDoc(collection(db, "vehicles", state.id, "services"), {
-    title: row.title,
+  const payload = {
+    title: entry.title,
     status: "scheduled",
-    dueOn: row.dueOn,
-    dueOdometerMiles: row.dueOdometerMiles,
+    dueOn: entry.dueOn ?? null,
+    dueOdometerMiles: entry.dueOdometerMiles ?? null,
     shop: null,
     notes: null,
     servicedOn: null,
     odometerMiles: null,
     costCents: null,
-    repeatMiles: row.everyMiles,
-    repeatMonths: row.everyMonths,
+    repeatMiles: entry.everyMiles ?? null,
+    repeatMonths: entry.everyMonths ?? null,
+  };
+
+  const added = await addDoc(collection(db, "vehicles", vehicleId, "services"), {
+    ...payload,
     createdAt: serverTimestamp(),
   });
-  await recomputeSummary(state.id);
-  showToast(`${row.title} added to the service list`);
+  await recomputeSummary(vehicleId);
+  showToast(`${entry.title} added to the service list`);
+  return { id: added.id, ...payload };
+}
+
+async function bookPlanEntry(state, id) {
+  const odometerMiles = currentOdometer(state.vehicle, state.fillups, state.services);
+  const row = scheduleRows(state.schedule, state.services, { odometerMiles, today: new Date() })
+    .find((entry) => entry.id === id);
+  if (!row) return;
+  await bookScheduleEntry(state.id, row, state.services);
 }
 
 // Moves the shelf by the difference between what a record used to book and what
