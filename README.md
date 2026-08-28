@@ -15,6 +15,12 @@ home.
   odometer, and a badge when something is **due soon** or **overdue** — and
   below that, **Coming up**: everything due across the whole garage, and what
   it needs off the shelf. See [What's coming up](#whats-coming-up).
+- Every action sits at the top of what it acts on rather than under it: a
+  page's own action beside its heading (**More** on the garage, **+ Add a
+  service** on the schedule, **+ Add a part** on the shelf), and a section's on
+  its section heading (**Log as one visit** on Service, **Show all** on the gas
+  log). A list growing longer never pushes its own control further down the
+  page.
 - **Vehicle page** (`?vehicle=<id>`): average MPG up top with a chart of your
   recent fill-ups, then the numbers that come out of the log (best, worst, cost
   per mile, average price per gallon, total spent on fuel), then service, then
@@ -300,8 +306,8 @@ converting.
 
 #### Turning the list into a visit
 
-With more than one job waiting, **🔧 Log these as one visit** sits under the
-Service section and opens that same sheet with the work already typed in: a line
+With more than one job waiting, **Log as one visit** appears on the Service
+heading and opens that same sheet with the work already typed in: a line
 per job in the order the list shows them, each job's note beside it, the parts
 those jobs said they'd need added up across all of them, and the shop if every
 one of them names the same shop. Fill in what each cost and save, and you get
@@ -370,7 +376,7 @@ the pressing ones get the green button. A row already on the list says so
 instead of offering to add a second copy.
 
 Once there's more than one job waiting, the Service section on the vehicle page
-offers **🔧 Log these as one visit** — see [One visit, several
+offers **Log as one visit** on its Service heading — see [One visit, several
 jobs](#one-visit-several-jobs).
 
 ### Receipt photos
@@ -465,6 +471,13 @@ far off they are.
 At the top is **To buy** — everything the coming work needs, added up across
 jobs and set against the shelf, so a Saturday oil change doesn't stall on a
 filter nobody bought.
+
+A row badged **Due** is one a vehicle's schedule merely implies is next, and it
+carries its own **Add to list** — the same button the schedule page offers, so
+you can commit to a job from the garage screen without opening the vehicle
+first. It writes the same record either way, repeat intervals included. Rows
+badged **Booked** are already on a list, which is what the badge says, so they
+have nothing to add.
 
 Working this out needs every vehicle's schedule, services and fill-ups, which
 the vehicle list itself doesn't — so it's read after the list has been asked

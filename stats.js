@@ -483,9 +483,9 @@ export function upcomingWork(vehicles, { months = 12, today = new Date() } = {})
     }
 
     // Then anything the schedule says is next, unless it's already booked.
-    const booked = new Set(rows.map((row) => String(row.title || "").toLowerCase()));
+    const booked = new Set(rows.map((row) => normalizeJob(row.title)));
     for (const entry of scheduleRows(vehicle.schedule || [], services, { odometerMiles, today })) {
-      if (entry.neverDone || booked.has(String(entry.title || "").toLowerCase())) continue;
+      if (entry.neverDone || booked.has(normalizeJob(entry.title))) continue;
       rows.push({
         source: "schedule",
         id: entry.id,
