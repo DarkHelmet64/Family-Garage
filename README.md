@@ -356,11 +356,32 @@ needed:
 > last done Aug 27, 2026 at 52,400 mi
 > next: due Feb 27, 2027 (in 184 days) · due at 57,400 mi (5,000 mi away)
 
-Overdue first, then due soon, then anything you've never logged (there's nothing
-to count from until you do — the first one you log starts the clock), then the
-rest. Nothing here is stored as a reminder: the next-due figures are worked out
-from your history every time the page opens, so **logging a service moves them
-on its own**. Shorten an interval and every date recalculates on the spot.
+Overdue first, then due soon, then the rest. Nothing here is stored as a
+reminder: the next-due figures are worked out from your history every time the
+page opens, so **logging a service moves them on its own**. Shorten an interval
+and every date recalculates on the spot.
+
+### A job you've never logged
+
+There's no last-done to count from, so the vehicle's own beginning stands in:
+**zero miles, on January 1st of its model year**. A cabin filter due every 12
+months, never logged, on a 2016 car was due in January 2017 — so that's what the
+row says, and it reads as overdue, which it is.
+
+> **Cabin air filter** — every 12 months
+> never logged — counting from new, Jan 1, 2016 at 0 mi
+> next: due Jan 1, 2017 (3,526 days ago)
+
+The row says what it counted from, because a figure worked out from the
+vehicle's age is an assumption and one measured from a service you logged isn't.
+Log the job once and the assumption is gone — the real date takes over.
+
+A vehicle with **no model year** has no such date to fall back on. Those entries
+stay as they were: "not logged yet", with no next-due, until you log one.
+
+These jobs appear in [What's coming up](#whats-coming-up) too, badged **never
+logged** and collected under **Overdue** rather than filed under the month their
+assumed date fell in — which on an older vehicle is years back.
 
 A job done as part of a multi-item visit counts — if your February trip covered
 an oil change, an air filter and brake pads, all three have their own last-done
@@ -461,23 +482,33 @@ whole garage: everything due in the next **6 or 12 months**, whether it was
 booked in or is simply what a vehicle's schedule implies next, grouped by
 month. It's there as soon as you open the site rather than behind a menu.
 
+Anything already due leads, under **Overdue**, rather than being filed under the
+month it fell in — those months are behind you, and heading the page with
+"January 2017" would bury the work actually ahead. The 6/12-month window narrows
+what's coming; it never hides what you're already late for.
+
 A job due on mileage doesn't say *when* — which is the one thing planning needs.
 So mileage is turned into a date using how fast that vehicle has actually been
 driven, measured across its fill-up history. Those dates are marked
-**(estimated)**. A vehicle without enough fill-ups to measure gets no guess:
-its mileage-only jobs are listed separately under "when you get there", with how
-far off they are.
+**(estimated)**. Only miles still to drive can be turned into a date: a job
+you're already past says how far past instead. And a vehicle without enough
+fill-ups to measure gets no guess — its mileage-only jobs are listed separately
+under "when you get there", with how far off they are.
 
 At the top is **To buy** — everything the coming work needs, added up across
 jobs and set against the shelf, so a Saturday oil change doesn't stall on a
 filter nobody bought.
 
-A row badged **Due** is one a vehicle's schedule merely implies is next, and it
-carries its own **Add to list** — the same button the schedule page offers, so
-you can commit to a job from the garage screen without opening the vehicle
-first. It writes the same record either way, repeat intervals included. Rows
-badged **Booked** are already on a list, which is what the badge says, so they
-have nothing to add.
+The badge says where a row came from. **Booked** is already on a vehicle's
+service list. **Due** is one its schedule implies is next, measured from a
+service you logged. **Never logged** is one the schedule dated from [the
+vehicle's model year](#a-job-youve-never-logged) instead — the same job, but an
+assumption rather than a measurement, and worth knowing apart.
+
+The last two carry their own **Add to list** — the same button the schedule page
+offers, so you can commit to a job from the garage screen without opening the
+vehicle first. It writes the same record either way, repeat intervals included.
+A booked row has nothing to add, which is what its badge says.
 
 Working this out needs every vehicle's schedule, services and fill-ups, which
 the vehicle list itself doesn't — so it's read after the list has been asked

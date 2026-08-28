@@ -222,13 +222,11 @@ button:disabled { opacity: 0.5; cursor: default; }
   gap: 10px;
 }
 
-.inline-link {
-  color: var(--brand);
-  text-decoration: none;
+/* A real action sitting on a section heading. The heading's uppercasing and
+   letter spacing are for the heading; the button reads as itself. */
+.section-title button {
   text-transform: none;
   letter-spacing: 0;
-  font-weight: 600;
-  font-size: 0.85rem;
 }
 
 /* Garage list ------------------------------------------------------------ */

@@ -383,29 +383,50 @@ export function lastDoneFor(title, services) {
   })[matches.length - 1];
 }
 
-// When an entry is next needed: the last time it was done plus its interval.
-// With no history there's nothing to measure from, so it reads as due now --
-// the first time you log one, the clock starts.
-export function nextDueFor(entry, lastDone) {
-  if (!lastDone) return { dueOn: null, dueOdometerMiles: null, neverDone: true };
+// What stands in for a job that has never been logged: the vehicle as it left
+// the factory -- zero miles, on January 1st of its model year. Every interval
+// then has something to count from, so a job never logged on a 2016 car reads
+// as long overdue rather than as a blank the page can say nothing about.
+//
+// A vehicle with no model year has no such date. Those entries stay
+// unmeasurable and say so, rather than counting from a year invented for them.
+export function vehicleStartBaseline(vehicleYear) {
+  const year = Number(vehicleYear);
+  if (!Number.isInteger(year) || year < 1000 || year > 9999) return null;
+  return { servicedOn: `${year}-01-01`, odometerMiles: 0 };
+}
+
+// When an entry is next needed: the last time it was done plus its interval --
+// or, with nothing logged, the same interval measured from the vehicle's own
+// beginning.
+export function nextDueFor(entry, lastDone, { vehicleYear = null } = {}) {
+  const from = lastDone || vehicleStartBaseline(vehicleYear);
+  if (!from) return { dueOn: null, dueOdometerMiles: null, neverDone: true, countedFrom: null };
   return {
-    dueOn: entry.everyMonths && lastDone.servicedOn ? addMonthsISO(lastDone.servicedOn, entry.everyMonths) : null,
+    dueOn: entry.everyMonths && from.servicedOn ? addMonthsISO(from.servicedOn, entry.everyMonths) : null,
     dueOdometerMiles:
-      entry.everyMiles && lastDone.odometerMiles !== null ? lastDone.odometerMiles + entry.everyMiles : null,
-    neverDone: false,
+      entry.everyMiles && from.odometerMiles !== null ? from.odometerMiles + entry.everyMiles : null,
+    neverDone: !lastDone,
+    // Set only when the figures came from the vehicle's age rather than from
+    // something logged, so the page can say where they came from -- the
+    // difference between a measurement and an assumption is worth showing.
+    countedFrom: lastDone ? null : from,
   };
 }
 
 // The whole page in one call: each entry with when it was last done, when it's
 // next needed, and how urgent that is -- most pressing first.
-export function scheduleRows(schedule, services, { odometerMiles = null, today = new Date() } = {}) {
+export function scheduleRows(schedule, services, { odometerMiles = null, today = new Date(), vehicleYear = null } = {}) {
   const rows = schedule.map((entry) => {
     const lastDone = lastDoneFor(entry.title, services);
-    const due = nextDueFor(entry, lastDone);
-    const status = due.neverDone
-      ? { key: "unknown", label: "Not logged yet" }
-      : serviceStatus({ status: "scheduled", dueOn: due.dueOn, dueOdometerMiles: due.dueOdometerMiles },
-          { odometerMiles, today });
+    const due = nextDueFor(entry, lastDone, { vehicleYear });
+    // Nothing logged *and* no model year to fall back on is the only case left
+    // that can't say when a job is next needed.
+    const status =
+      due.dueOn === null && due.dueOdometerMiles === null
+        ? { key: "unknown", label: "Not logged yet" }
+        : serviceStatus({ status: "scheduled", dueOn: due.dueOn, dueOdometerMiles: due.dueOdometerMiles },
+            { odometerMiles, today });
     return { ...entry, lastDone, ...due, status };
   });
 
@@ -459,6 +480,11 @@ export function dateAfterDays(days, today = new Date()) {
 // at all is handed back separately rather than being guessed at.
 export function upcomingWork(vehicles, { months = 12, today = new Date() } = {}) {
   const horizon = addMonthsISO(dateAfterDays(0, today), months);
+  // Anything already due is collected on its own rather than grouped under the
+  // month it fell in. Those months are behind you -- and a job never logged on
+  // an older vehicle is dated from that vehicle's age, which can be years back.
+  // Heading the page with "January 2017" would bury the work actually ahead.
+  const overdue = [];
   const dated = [];
   const undated = [];
 
@@ -482,10 +508,17 @@ export function upcomingWork(vehicles, { months = 12, today = new Date() } = {})
       });
     }
 
-    // Then anything the schedule says is next, unless it's already booked.
+    // Then anything the schedule says is next, unless it's already booked --
+    // including jobs never logged, which the schedule dates from the vehicle's
+    // own beginning. Those dates are assumptions rather than measurements, so
+    // the row carries `neverDone` and says as much.
     const booked = new Set(rows.map((row) => normalizeJob(row.title)));
-    for (const entry of scheduleRows(vehicle.schedule || [], services, { odometerMiles, today })) {
-      if (entry.neverDone || booked.has(normalizeJob(entry.title))) continue;
+    for (const entry of scheduleRows(vehicle.schedule || [], services, {
+      odometerMiles,
+      today,
+      vehicleYear: vehicle.year ?? null,
+    })) {
+      if (booked.has(normalizeJob(entry.title))) continue;
       rows.push({
         source: "schedule",
         id: entry.id,
@@ -493,14 +526,19 @@ export function upcomingWork(vehicles, { months = 12, today = new Date() } = {})
         dueOn: entry.dueOn || null,
         dueOdometerMiles: entry.dueOdometerMiles ?? null,
         partsNeeded: [],
+        neverDone: entry.neverDone,
+        countedFrom: entry.countedFrom || null,
       });
     }
 
     for (const row of rows) {
       const milesAway =
         row.dueOdometerMiles !== null && odometerMiles !== null ? row.dueOdometerMiles - odometerMiles : null;
-      const projectedOn =
-        milesAway !== null && rate ? dateAfterDays(Math.max(0, milesAway) / rate, today) : null;
+      // Only miles still to drive can be turned into a date. Projecting from a
+      // mileage already passed used to clamp to today, which read as "due
+      // today" on a job thirty thousand miles past -- so it gets no date at
+      // all, and the row says how far past it is instead.
+      const projectedOn = milesAway !== null && milesAway > 0 && rate ? dateAfterDays(milesAway / rate, today) : null;
 
       // Whichever comes first, as everywhere else in the app.
       const on = row.dueOn && projectedOn ? (row.dueOn < projectedOn ? row.dueOn : projectedOn) : row.dueOn || projectedOn;
@@ -514,14 +552,30 @@ export function upcomingWork(vehicles, { months = 12, today = new Date() } = {})
         projected: !!on && on === projectedOn && !(row.dueOn && row.dueOn <= projectedOn),
       };
 
-      if (!on) undated.push(entry);
+      // Overdue by the same rule as everywhere else, rather than by whether
+      // `on` fell in the past. A job driven past its due mileage projects to
+      // *today* -- the projection can't run backwards -- so going by the date
+      // alone would file something 38,000 miles overdue under this month.
+      const status = serviceStatus(
+        { status: "scheduled", dueOn: row.dueOn, dueOdometerMiles: row.dueOdometerMiles },
+        { odometerMiles, today }
+      );
+
+      // And it isn't subject to the window: switching to six months narrows
+      // what's ahead, not what you're already late for.
+      if (status.key === "overdue") overdue.push(entry);
+      else if (!on) undated.push(entry);
       else if (on <= horizon) dated.push(entry);
     }
   }
 
-  dated.sort((a, b) => String(a.on).localeCompare(String(b.on)) || String(a.vehicleName).localeCompare(String(b.vehicleName)));
+  const soonestFirst = (a, b) =>
+    String(a.on).localeCompare(String(b.on)) || String(a.vehicleName).localeCompare(String(b.vehicleName));
+  // Oldest first among the overdue, which is longest-overdue first.
+  overdue.sort(soonestFirst);
+  dated.sort(soonestFirst);
   undated.sort((a, b) => (a.milesAway ?? Infinity) - (b.milesAway ?? Infinity));
-  return { horizon, dated, undated };
+  return { horizon, overdue, dated, undated };
 }
 
 // Everything the coming work asks for, against what's on the shelf.
