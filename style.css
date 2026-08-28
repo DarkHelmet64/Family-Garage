@@ -222,6 +222,16 @@ button:disabled { opacity: 0.5; cursor: default; }
   gap: 10px;
 }
 
+/* More than one action on a heading: they group at its right-hand end rather
+   than pushing apart to the two ends of the row. */
+.heading-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
 /* A real action sitting on a section heading. The heading's uppercasing and
    letter spacing are for the heading; the button reads as itself. */
 .section-title button {

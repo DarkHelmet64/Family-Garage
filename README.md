@@ -252,11 +252,21 @@ it carries forward from there.
 
 ## Service
 
-Tap **🔧 Add service** for either:
+**+ Add** on the Service heading puts a job on the list: a name ("Oil change",
+"Replace serpentine belt"), and a due date, a due mileage, or both — whichever
+comes first is what the reminder goes by. Optionally a shop, the parts it'll
+need, and a note.
 
-- **Schedule something coming up** — a name ("Oil change", "State inspection"),
-  and a due date, a due mileage, or both. Whichever comes first is what the
-  reminder goes by.
+Nothing about it has to come from the [service
+schedule](#the-service-schedule). The schedule is for jobs that come round on
+an interval; this is for the one-off — the belt that started squealing, the
+recall letter, the thing you noticed on the drive home. Either way it lands on
+the same list, shows on the garage badge, and appears in [What's coming
+up](#whats-coming-up) as **booked**.
+
+Tap **🔧 Add service** at the top of the page instead for either:
+
+- **Schedule something coming up** — the same sheet **+ Add** opens.
 - **Log service already done** — one trip to the shop, however many jobs it
   covered.
 
