@@ -561,6 +561,8 @@ export function upcomingWork(vehicles, { months = 12, today = new Date() } = {})
         { odometerMiles, today }
       );
 
+      entry.status = status;
+
       // And it isn't subject to the window: switching to six months narrows
       // what's ahead, not what you're already late for.
       if (status.key === "overdue") overdue.push(entry);

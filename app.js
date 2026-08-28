@@ -295,16 +295,6 @@ function mountComingUp() {
     if (target.dataset.act === "window") {
       state.months = Number(target.dataset.id);
       renderComingUp(state);
-    } else if (target.dataset.act === "book-row") {
-      // Disabled until the write lands, so a second tap can't book it twice.
-      // Re-enabled either way: on success the redraw has replaced this button
-      // anyway, and on failure it's the one you'd want to try again.
-      target.disabled = true;
-      Promise.resolve(bookRowFromGarage(state, target.dataset.vehicle, target.dataset.id))
-        .catch(reportActionFailure)
-        .finally(() => {
-          target.disabled = false;
-        });
     }
   });
 
@@ -351,30 +341,6 @@ async function loadGarage() {
   return { vehicles, parts: partSnap.docs.map((d) => ({ id: d.id, ...d.data() })) };
 }
 
-// The look-ahead is read once when the dashboard opens rather than watched, so
-// the row it just booked is moved in that copy and the section redrawn --
-// cheaper than reading the whole garage again, and it lands in the same place
-// the next open would put it: off the schedule's side and onto the vehicle's.
-async function bookRowFromGarage(state, vehicleId, entryId) {
-  const vehicle = state.vehicles.find((candidate) => candidate.id === vehicleId);
-  if (!vehicle) return;
-
-  // Worked out from the vehicle's own schedule rather than from the row, so
-  // this writes exactly what the schedule page would write -- the repeat
-  // intervals included, which the look-ahead row doesn't carry.
-  const entry = scheduleRows(vehicle.schedule || [], vehicle.services || [], {
-    odometerMiles: vehicle.odometerMiles ?? null,
-    today: new Date(),
-    vehicleYear: vehicle.year,
-  }).find((row) => row.id === entryId);
-  if (!entry) return;
-
-  const added = await bookScheduleEntry(vehicleId, entry, vehicle.services || []);
-  if (!added) return;
-  vehicle.services = [...(vehicle.services || []), added];
-  renderComingUp(state);
-}
-
 function renderComingUp(state) {
   const bodyEl = document.getElementById("coming-up-body");
   document.querySelectorAll("[data-act=window]").forEach((button) => {
@@ -395,15 +361,20 @@ function renderComingUp(state) {
     return;
   }
 
-  // Grouped by month, because that's the unit people plan in.
-  let currentMonth = "";
-  const timeline = dated
-    .map((row) => {
-      const month = formatMonth(row.on);
-      const heading = month === currentMonth ? "" : `<div class="section-title">${escapeHtml(month)}</div>`;
-      currentMonth = month;
-      return heading + planRowHtml(row, state.parts);
-    })
+  // Most pressing first across the whole garage, then split by vehicle keeping
+  // that order -- so the car with the oldest overdue job heads the section, and
+  // each one's own list still reads worst-first.
+  const byVehicle = new Map();
+  for (const row of [...overdue, ...dated, ...undated]) {
+    if (!byVehicle.has(row.vehicleId)) byVehicle.set(row.vehicleId, { name: row.vehicleName, rows: [] });
+    byVehicle.get(row.vehicleId).rows.push(row);
+  }
+
+  const timeline = [...byVehicle.values()]
+    .map(
+      (vehicle) => `<div class="section-title">${escapeHtml(vehicle.name)}</div>
+         <div class="list">${vehicle.rows.map(planRowHtml).join("")}</div>`
+    )
     .join("");
 
   bodyEl.innerHTML = `
@@ -412,8 +383,7 @@ function renderComingUp(state) {
         ? `${overdue.length} job${overdue.length === 1 ? "" : "s"} already due, and ${dated.length} in the next
            ${state.months} months.`
         : `${dated.length} job${dated.length === 1 ? "" : "s"} due in the next ${state.months} months.`
-    } Dates worked out from mileage are marked — they follow how each vehicle has actually been
-    driven.</p>
+    } Open a vehicle for the dates, the mileages, and what each job needs off the shelf.</p>
 
     ${
       shortages.length
@@ -433,79 +403,19 @@ function renderComingUp(state) {
           : ""
     }
 
-    ${
-      overdue.length
-        ? `<div class="section-title">Overdue</div>
-           <div class="list">${overdue.map((row) => planRowHtml(row, state.parts)).join("")}</div>`
-        : ""
-    }
-
     ${timeline}
-
-    ${
-      undated.length
-        ? `<div class="section-title">When you get there</div>
-           <p class="hint">Nothing to date these by yet — one due on mileage needs a few fill-ups to
-           measure against, and one never logged needs the vehicle's model year to count from.</p>
-           <div class="list">${undated.map((row) => planRowHtml(row, state.parts)).join("")}</div>`
-        : ""
-    }
   `;
 }
 
-function formatMonth(iso) {
-  const date = isoToDate(iso);
-  return date ? date.toLocaleDateString(undefined, { month: "long", year: "numeric" }) : "";
-}
-
-function planRowHtml(row, parts) {
-  const when = row.on
-    ? `${formatISO(row.on, { withYear: "auto" })}${row.projected ? " (estimated)" : ""}`
-    : row.dueOdometerMiles !== null
-      ? `at ${formatMiles(row.dueOdometerMiles)}${
-          // Past the mileage reads as "past", not as a negative distance away.
-          row.milesAway === null
-            ? ""
-            : row.milesAway > 0
-              ? ` · ${formatMiles(row.milesAway)} away`
-              : ` · ${formatMiles(-row.milesAway)} past`
-        }`
-      : "no date set";
-
-  const needed = (row.partsNeeded || []).map((need) => {
-    const part = parts.find((candidate) => candidate.id === need.partId);
-    const have = part ? Number(part.quantity) || 0 : 0;
-    return { ...need, short: have < Number(need.quantity || 0) };
-  });
-
+function planRowHtml(row) {
   return `
     <div class="row plan-row">
       <div class="row-main">
         <span class="row-title-text">${escapeHtml(row.title)}</span>
-        <span class="row-meta">${escapeHtml(row.vehicleName)} · ${escapeHtml(when)}</span>
-        ${
-          needed.length
-            ? `<span class="row-meta parts-line${needed.some((n) => n.short) ? " short" : ""}">Needs ${escapeHtml(
-                needed.map((n) => `${n.quantity} × ${n.name}`).join(", ")
-              )}</span>`
-            : ""
-        }
       </div>
       <div class="row-side">
-        <span class="badge ${
-          row.source === "booked" ? "soon" : row.neverDone ? "unknown" : "scheduled"
-        }">${row.source === "booked" ? "Booked" : row.neverDone ? "Never logged" : "Due"}</span>
-        <div class="plan-actions">
-          ${
-            // A booked row is already on its vehicle's list -- that's what the
-            // badge says. Only what the schedule merely implies can be added.
-            row.source === "booked"
-              ? ""
-              : `<button class="secondary small" data-act="book-row" data-vehicle="${escapeHtml(row.vehicleId)}"
-                         data-id="${escapeHtml(row.id)}">Add to list</button>`
-          }
-          <a class="ghost btn" href="?vehicle=${encodeURIComponent(row.vehicleId)}">Open</a>
-        </div>
+        <span class="badge ${row.status.key}">${escapeHtml(row.status.label)}</span>
+        <a class="ghost btn" href="?vehicle=${encodeURIComponent(row.vehicleId)}">Open</a>
       </div>
     </div>
   `;

@@ -389,9 +389,9 @@ Log the job once and the assumption is gone — the real date takes over.
 A vehicle with **no model year** has no such date to fall back on. Those entries
 stay as they were: "not logged yet", with no next-due, until you log one.
 
-These jobs appear in [What's coming up](#whats-coming-up) too, badged **never
-logged** and collected under **Overdue** rather than filed under the month their
-assumed date fell in — which on an older vehicle is years back.
+These jobs appear in [What's coming up](#whats-coming-up) too, where a job
+counted from the vehicle's age reads as **overdue** like any other — which, on a
+2016 car, it is.
 
 A job done as part of a multi-item visit counts — if your February trip covered
 an oil change, an air filter and brake pads, all three have their own last-done
@@ -505,36 +505,38 @@ with one tap.
 
 Under the vehicle list on the garage screen, **Coming up** looks across the
 whole garage: everything due in the next **6 or 12 months**, whether it was
-booked in or is simply what a vehicle's schedule implies next, grouped by
-month. It's there as soon as you open the site rather than behind a menu.
+booked in or is simply what a vehicle's schedule implies next. It's there as
+soon as you open the site rather than behind a menu.
 
-Anything already due leads, under **Overdue**, rather than being filed under the
-month it fell in — those months are behind you, and heading the page with
-"January 2017" would bury the work actually ahead. The 6/12-month window narrows
-what's coming; it never hides what you're already late for.
+It's deliberately short — a name, how it stands, and a way in:
 
-A job due on mileage doesn't say *when* — which is the one thing planning needs.
-So mileage is turned into a date using how fast that vehicle has actually been
-driven, measured across its fill-up history. Those dates are marked
-**(estimated)**. Only miles still to drive can be turned into a date: a job
-you're already past says how far past instead. And a vehicle without enough
-fill-ups to measure gets no guess — its mileage-only jobs are listed separately
-under "when you get there", with how far off they are.
+> **BLUE ODYSSEY**
+> Cabin air filter · **overdue** · Open
+> Brake pads · **due soon** · Open
+>
+> **RED TACOMA**
+> Oil change · **overdue** · Open
+
+**Sectioned by vehicle**, because that's the question a garage screen answers:
+what does each car need. Within a section the worst comes first, and the vehicle
+with the oldest overdue job heads the page. Everything else a job knows — its
+date, its mileage, what it needs off the shelf, whether that date was measured
+or assumed — is one tap away behind **Open**, on the page that owns it.
+
+A job you're already late for is listed however far back it went: the 6/12-month
+window narrows what's *coming*, never what you're overdue for. That window is
+still what decides how far ahead to look.
 
 At the top is **To buy** — everything the coming work needs, added up across
 jobs and set against the shelf, so a Saturday oil change doesn't stall on a
-filter nobody bought.
+filter nobody bought. It counts overdue work too; a late oil change needs its
+oil just as much.
 
-The badge says where a row came from. **Booked** is already on a vehicle's
-service list. **Due** is one its schedule implies is next, measured from a
-service you logged. **Never logged** is one the schedule dated from [the
-vehicle's model year](#a-job-youve-never-logged) instead — the same job, but an
-assumption rather than a measurement, and worth knowing apart.
-
-The last two carry their own **Add to list** — the same button the schedule page
-offers, so you can commit to a job from the garage screen without opening the
-vehicle first. It writes the same record either way, repeat intervals included.
-A booked row has nothing to add, which is what its badge says.
+Behind the scenes a job due on mileage is still turned into a date, using how
+fast that vehicle has actually been driven, to decide where in the next 6 or 12
+months it falls. Only miles still to drive can be dated that way — a job you're
+already past is simply overdue. A vehicle without enough fill-ups to measure
+gets no guess, and its mileage-only jobs sit at the end of their vehicle's list.
 
 Working this out needs every vehicle's schedule, services and fill-ups, which
 the vehicle list itself doesn't — so it's read after the list has been asked
