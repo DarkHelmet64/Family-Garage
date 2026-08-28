@@ -383,11 +383,13 @@ function renderComingUp(state) {
   if (!state.loaded) return;
 
   const today = new Date();
-  const { dated, undated } = upcomingWork(state.vehicles, { months: state.months, today });
-  const forecast = partsForecast(dated, state.parts);
+  const { overdue, dated, undated } = upcomingWork(state.vehicles, { months: state.months, today });
+  // The shopping list covers what you're late for as well as what's ahead --
+  // an overdue oil change needs its oil just as much.
+  const forecast = partsForecast([...overdue, ...dated], state.parts);
   const shortages = forecast.filter((need) => need.short > 0);
 
-  if (!dated.length && !undated.length) {
+  if (!overdue.length && !dated.length && !undated.length) {
     bodyEl.innerHTML = `<p class="empty small">Nothing due in the next ${state.months} months. Add intervals on a
       vehicle's <strong>Service schedule</strong>, or book a job in, and it'll show up here.</p>`;
     return;
@@ -405,9 +407,13 @@ function renderComingUp(state) {
     .join("");
 
   bodyEl.innerHTML = `
-    <p class="hint">${dated.length} job${dated.length === 1 ? "" : "s"} due in the next
-    ${state.months} months. Dates worked out from mileage are marked — they follow how each
-    vehicle has actually been driven.</p>
+    <p class="hint">${
+      overdue.length
+        ? `${overdue.length} job${overdue.length === 1 ? "" : "s"} already due, and ${dated.length} in the next
+           ${state.months} months.`
+        : `${dated.length} job${dated.length === 1 ? "" : "s"} due in the next ${state.months} months.`
+    } Dates worked out from mileage are marked — they follow how each vehicle has actually been
+    driven.</p>
 
     ${
       shortages.length
@@ -427,13 +433,20 @@ function renderComingUp(state) {
           : ""
     }
 
+    ${
+      overdue.length
+        ? `<div class="section-title">Overdue</div>
+           <div class="list">${overdue.map((row) => planRowHtml(row, state.parts)).join("")}</div>`
+        : ""
+    }
+
     ${timeline}
 
     ${
       undated.length
         ? `<div class="section-title">When you get there</div>
            <p class="hint">Nothing to date these by yet — one due on mileage needs a few fill-ups to
-           measure against, and one added to the list before it's been logged has no due date at all.</p>
+           measure against, and one never logged needs the vehicle's model year to count from.</p>
            <div class="list">${undated.map((row) => planRowHtml(row, state.parts)).join("")}</div>`
         : ""
     }
@@ -449,7 +462,14 @@ function planRowHtml(row, parts) {
   const when = row.on
     ? `${formatISO(row.on, { withYear: "auto" })}${row.projected ? " (estimated)" : ""}`
     : row.dueOdometerMiles !== null
-      ? `at ${formatMiles(row.dueOdometerMiles)}${row.milesAway !== null ? ` · ${formatMiles(row.milesAway)} away` : ""}`
+      ? `at ${formatMiles(row.dueOdometerMiles)}${
+          // Past the mileage reads as "past", not as a negative distance away.
+          row.milesAway === null
+            ? ""
+            : row.milesAway > 0
+              ? ` · ${formatMiles(row.milesAway)} away`
+              : ` · ${formatMiles(-row.milesAway)} past`
+        }`
       : "no date set";
 
   const needed = (row.partsNeeded || []).map((need) => {
@@ -472,7 +492,9 @@ function planRowHtml(row, parts) {
         }
       </div>
       <div class="row-side">
-        <span class="badge ${row.source === "booked" ? "soon" : "scheduled"}">${row.source === "booked" ? "Booked" : "Due"}</span>
+        <span class="badge ${
+          row.source === "booked" ? "soon" : row.neverDone ? "unknown" : "scheduled"
+        }">${row.source === "booked" ? "Booked" : row.neverDone ? "Never logged" : "Due"}</span>
         <div class="plan-actions">
           ${
             // A booked row is already on its vehicle's list -- that's what the
@@ -506,7 +528,7 @@ function renderPartsView() {
     <a class="back-link" href="./">&larr; Garage</a>
     <div class="page-head">
       <h1><span class="emoji">🔩</span>Parts &amp; supplies</h1>
-      <button class="ghost" data-act="add-part">+ Add a part</button>
+      <button class="secondary small" data-act="add-part">+ Add a part</button>
     </div>
     <p class="hint" id="parts-intro"></p>
     <div id="parts-list"><p class="loading">Loading…</p></div>
@@ -891,7 +913,7 @@ function vehicleBodyHtml(state) {
       <span>Service</span>
       ${
         open.length > 1
-          ? `<a class="inline-link" href="#" data-act="log-visit">Log as one visit</a>`
+          ? `<button class="secondary small" data-act="log-visit">Log as one visit</button>`
           : ""
       }
     </div>
@@ -1932,7 +1954,7 @@ function scheduleBodyHtml(state) {
   return `
     <div class="page-head">
       <h1><span class="emoji">🔧</span>Service schedule</h1>
-      <button class="ghost" data-act="add-plan">+ Add a service</button>
+      <button class="secondary small" data-act="add-plan">+ Add a service</button>
     </div>
     <p class="hint">${escapeHtml(state.vehicle.name)} · ${formatMiles(odometerMiles)} on the odometer.
     How often each job comes round, and when it's next needed. Worked out from what you've
