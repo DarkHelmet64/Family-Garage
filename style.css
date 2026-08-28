@@ -1082,6 +1082,44 @@ input[type="file"] {
 .parts-line { font-style: italic; }
 .parts-line.short { color: var(--amber); font-style: normal; font-weight: 600; }
 
+/* Which vehicles a part fits, on its shelf row. */
+.fits-line { font-style: italic; }
+
+/* Several answers to one question, as chips. The native checkbox stays in the
+   DOM (and focusable) behind its label so the keyboard still works. */
+.check-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.check-chip input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.check-chip span {
+  display: inline-block;
+  padding: 5px 10px;
+  border: 1px solid var(--brand);
+  border-radius: 10px;
+  color: var(--brand);
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.check-chip input:checked + span {
+  background: var(--brand);
+  color: white;
+}
+
+.check-chip input:focus-visible + span {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+}
+
 /* Under a row in the parts picker, when the shelf can't cover it. */
 .field-hint.short { color: var(--amber); }
 
@@ -1137,16 +1175,9 @@ input[type="file"] {
 .plan-row { margin-bottom: 8px; }
 
 .plan-row .row-side {
-  align-items: flex-end;
-  gap: 8px;
-}
-
-/* Side by side, so a row offering both stays as short as one offering only
-   "Open" -- there's little enough in a plan row's main column as it is. */
-.plan-actions {
-  display: flex;
+  flex-direction: row;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
 }
 
 .plan-row .btn.ghost {
