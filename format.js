@@ -10,7 +10,7 @@
 export function formatUSD(cents) {
   const sign = cents < 0 ? "-" : "";
   const abs = Math.abs(cents);
-  return `${sign}$${(abs / 100).toFixed(2)}`;
+  return `${sign}$${(abs / 100).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
 // Gas prices are quoted to a tenth of a cent, so keep the third decimal here.
