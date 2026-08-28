@@ -15,6 +15,10 @@ home.
   odometer, and a badge when something is **due soon** or **overdue** — and
   below that, **Coming up**: everything due across the whole garage, and what
   it needs off the shelf. See [What's coming up](#whats-coming-up).
+- Each screen's actions sit at the top of what they act on rather than under
+  it: **More** beside the garage heading, and a section's own action on its
+  heading — **Log as one visit** on Service, **Show all** on the gas log. A
+  list growing longer never pushes its own control further down the page.
 - **Vehicle page** (`?vehicle=<id>`): average MPG up top with a chart of your
   recent fill-ups, then the numbers that come out of the log (best, worst, cost
   per mile, average price per gallon, total spent on fuel), then service, then
@@ -300,8 +304,8 @@ converting.
 
 #### Turning the list into a visit
 
-With more than one job waiting, **🔧 Log these as one visit** sits under the
-Service section and opens that same sheet with the work already typed in: a line
+With more than one job waiting, **Log as one visit** appears on the Service
+heading and opens that same sheet with the work already typed in: a line
 per job in the order the list shows them, each job's note beside it, the parts
 those jobs said they'd need added up across all of them, and the shop if every
 one of them names the same shop. Fill in what each cost and save, and you get
@@ -370,7 +374,7 @@ the pressing ones get the green button. A row already on the list says so
 instead of offering to add a second copy.
 
 Once there's more than one job waiting, the Service section on the vehicle page
-offers **🔧 Log these as one visit** — see [One visit, several
+offers **Log as one visit** on its Service heading — see [One visit, several
 jobs](#one-visit-several-jobs).
 
 ### Receipt photos

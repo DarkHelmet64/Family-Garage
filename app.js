@@ -136,7 +136,10 @@ function vehicleSubtitle(data) {
 
 function renderGarageView() {
   $app.innerHTML = `
-    <h1><span class="emoji">🚗</span>Family Garage</h1>
+    <div class="page-head">
+      <h1><span class="emoji">🚗</span>Family Garage</h1>
+      <button class="ghost" id="more-btn">More</button>
+    </div>
     <div id="vehicle-list"><p class="loading">Loading…</p></div>
     <section id="coming-up" hidden>
       <div class="coming-up-head">
@@ -148,7 +151,6 @@ function renderGarageView() {
       </div>
       <div id="coming-up-body"><p class="loading small">Reading the whole garage…</p></div>
     </section>
-    <button class="secondary full-action" id="more-btn">More</button>
   `;
 
   document.getElementById("more-btn").addEventListener("click", openGarageMenu);
@@ -881,16 +883,18 @@ function vehicleBodyHtml(state) {
 
     ${statsGridHtml(summary, totalServiceCostCents(state.services))}
 
-    <div class="section-title">Service</div>
+    <div class="section-title row-title">
+      <span>Service</span>
+      ${
+        open.length > 1
+          ? `<a class="inline-link" href="#" data-act="log-visit">Log as one visit</a>`
+          : ""
+      }
+    </div>
     ${
       open.length
         ? `<div class="list">${open.map((s) => serviceRowHtml(s, ctx)).join("")}</div>`
         : `<p class="empty small">Nothing scheduled. Tap <strong>Add service</strong> to book the next oil change or log one you've already had done.</p>`
-    }
-    ${
-      open.length > 1
-        ? `<button class="secondary full-action list-action" data-act="log-visit">🔧 Log these as one visit</button>`
-        : ""
     }
 
     ${
@@ -903,17 +907,19 @@ function vehicleBodyHtml(state) {
         : ""
     }
 
-    <div class="section-title">Gas log</div>
+    <div class="section-title row-title">
+      <span>Gas log</span>
+      ${
+        recent.length > 5
+          ? `<a class="inline-link" href="#" data-act="toggle-fillups">${
+              state.showAllFillups ? "Show fewer" : `Show all ${recent.length}`
+            }</a>`
+          : ""
+      }
+    </div>
     ${
       shown.length
-        ? `<div class="list">${shown.map((entry) => fillupRowHtml(entry)).join("")}</div>
-           ${
-             recent.length > 5
-               ? `<div class="single-action"><a class="inline-link" href="#" data-act="toggle-fillups">${
-                   state.showAllFillups ? "Show fewer" : `Show all ${recent.length}`
-                 }</a></div>`
-               : ""
-           }`
+        ? `<div class="list">${shown.map((entry) => fillupRowHtml(entry)).join("")}</div>`
         : `<p class="empty small">No fill-ups yet. Log one every time you buy gas — MPG appears once you've filled the tank all the way twice.</p>`
     }
   `;

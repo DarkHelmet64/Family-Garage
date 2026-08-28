@@ -69,6 +69,18 @@ h1 {
   margin: 4px 0 20px;
 }
 
+/* A page whose one page-level action belongs beside the heading rather than
+   below everything on it -- the vehicle page's hero already reads this way. */
+.page-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 20px;
+}
+
+.page-head h1 { margin: 0; }
+
 h1 .emoji { margin-right: 6px; }
 
 .loading, .empty {
@@ -186,9 +198,6 @@ button:disabled { opacity: 0.5; cursor: default; }
   margin-top: 22px;
 }
 
-/* An action belonging to the list right above it rather than to the page, so
-   it sits close enough to read as part of it. */
-.full-action.list-action { margin-top: 10px; }
 
 .single-action {
   text-align: center;
