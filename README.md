@@ -472,10 +472,15 @@ one flat list it always was.
 part counts as fitting anything, which is what a case of oil or a box of rags
 is. Pick some and the shelf row says so.
 
-This changes the order of the parts picker on a service sheet, never what's in
-it: parts that fit the vehicle you're logging against come first, the rest
-follow under *for another vehicle*. Nothing is hidden, because a filter bought
-for the van can still be booked against the truck it ended up on.
+The parts picker on a service sheet then offers only what fits the vehicle
+you're logging against — the ones marked for it, plus everything marked for no
+vehicle in particular. Mark nothing on the shelf as fitting that vehicle and the
+picker says so rather than sitting there empty.
+
+One exception, and it matters: a part **already on the record** stays offered
+however it's marked. You can book a filter against the truck and mark it
+van-only afterwards; dropping it from the list would empty the select and
+quietly change what the record says was used.
 
 ### Using parts on a service
 

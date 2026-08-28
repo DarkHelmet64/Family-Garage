@@ -362,23 +362,27 @@ function renderField(field) {
 // Which parts a job uses, chosen off the shelf. Each row is a part and how many
 // of it; the count of what's actually in stock rides along in the option text
 // and a warning appears under any row asking for more than there is.
-// What a part says it fits decides the order, never what's offered: a filter
-// bought for the van can still be booked against the truck it ended up on.
-// A part naming no vehicle fits anything, which is what a case of oil is.
+// Only what fits the vehicle in hand. A part naming no vehicle fits anything,
+// which is what a case of oil or a box of rags is; one naming other vehicles
+// is left out.
+//
+// Except whatever the row already holds, which stays offered however it's
+// marked. A part can be booked against a vehicle and marked for another
+// afterwards, and dropping it from the list would empty the select and quietly
+// change what a saved record says was used.
 function partOptionsHtml(catalogue, selectedId, vehicleId) {
   const optionHtml = (part) =>
     `<option value="${escapeHtml(part.id)}" ${part.id === selectedId ? "selected" : ""}>${escapeHtml(part.name)} (${escapeHtml(String(part.quantity ?? 0))} ${escapeHtml(part.unit || "each")})</option>`;
 
   const fits = (part) => !(part.fitsVehicleIds || []).length || part.fitsVehicleIds.includes(vehicleId);
-  if (!vehicleId) return catalogue.map(optionHtml).join("");
+  const offered = vehicleId ? catalogue.filter((part) => fits(part) || part.id === selectedId) : catalogue;
 
-  const forThis = catalogue.filter(fits);
-  const forOthers = catalogue.filter((part) => !fits(part));
-  if (!forOthers.length) return forThis.map(optionHtml).join("");
+  // An empty list is a dead end otherwise -- nothing to pick and no reason why.
+  const placeholder = offered.length
+    ? `<option value="">— pick a part —</option>`
+    : `<option value="">— nothing on the shelf fits this vehicle —</option>`;
 
-  return `
-    <optgroup label="Fits this vehicle">${forThis.map(optionHtml).join("")}</optgroup>
-    <optgroup label="For another vehicle">${forOthers.map(optionHtml).join("")}</optgroup>`;
+  return placeholder + offered.map(optionHtml).join("");
 }
 
 function bindPartsField(overlay, field) {
@@ -414,7 +418,6 @@ function bindPartsField(overlay, field) {
         <div class="item-row" data-part-row>
           <div class="item-row-top">
             <select data-part-id>
-              <option value="">— pick a part —</option>
               ${partOptionsHtml(catalogue, row.partId, field.vehicleId)}
             </select>
             <input data-part-qty type="number" step="0.01" min="0" inputmode="decimal"
