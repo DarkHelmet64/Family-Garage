@@ -126,6 +126,11 @@ function siteUrl() {
   return url.toString();
 }
 
+// The order vehicles are listed in, wherever they're listed. By name, so it
+// doesn't shift about as the numbers change -- and shared, so the garage
+// screen's two lists can't disagree about which car comes first.
+const byVehicleName = (a, b) => String(a.name || "").localeCompare(String(b.name || ""));
+
 function vehicleSubtitle(data) {
   return [data.year, data.make, data.model].filter(Boolean).join(" ");
 }
@@ -141,6 +146,9 @@ function renderGarageView() {
       <button class="ghost" id="more-btn">More</button>
     </div>
     <div id="vehicle-list"><p class="loading">Loading…</p></div>
+    <div class="action-row">
+      <a class="btn shelf-btn" href="?parts">🔩 Parts &amp; supplies</a>
+    </div>
     <section id="coming-up" hidden>
       <h2><span class="emoji">📅</span>Coming up</h2>
       <div id="coming-up-body"><p class="loading small">Reading the whole garage…</p></div>
@@ -164,7 +172,7 @@ function renderGarageView() {
       }
       const vehicles = [];
       snap.forEach((docSnap) => vehicles.push({ id: docSnap.id, ...docSnap.data() }));
-      vehicles.sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")));
+      vehicles.sort(byVehicleName);
 
       listEl.innerHTML = vehicles.map(vehicleCardHtml).join("");
       refreshStaleSummaries(vehicles);
@@ -253,12 +261,10 @@ function openGarageMenu() {
     title: "More",
     options: [
       { value: "new", label: "+ Add a vehicle" },
-      { value: "parts", label: "🔩 Parts & supplies" },
       { value: "qr", label: "Show QR code" },
     ],
   }).then((choice) => {
     if (choice === "new") location.search = "?new";
-    else if (choice === "parts") location.search = "?parts";
     else if (choice === "qr") openQrModal(siteUrl(), "Scan to open Family Garage");
   });
 }
@@ -354,8 +360,8 @@ function renderComingUp(state) {
     return;
   }
 
-  // By vehicle, then by status within it. Vehicles appear in the order their
-  // most pressing job did, so the one you're furthest behind on heads the list.
+  // By vehicle, then by status within it -- in the same order as the vehicle
+  // cards above, so the two lists on this screen read down together.
   const byVehicle = new Map();
   for (const row of [...overdue, ...soon]) {
     if (!byVehicle.has(row.vehicleId)) {
@@ -365,6 +371,7 @@ function renderComingUp(state) {
   }
 
   const sections = [...byVehicle.values()]
+    .sort(byVehicleName)
     .map(
       (vehicle) => `
       <div class="section-title">${escapeHtml(vehicle.name)}</div>
@@ -486,7 +493,7 @@ function renderPartsView() {
     collection(db, "vehicles"),
     (snap) => {
       state.vehicles = snap.docs.map((d) => ({ id: d.id, name: d.data().name }));
-      state.vehicles.sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")));
+      state.vehicles.sort(byVehicleName);
       if (state.parts.length) drawParts(listEl, state);
     },
     (err) => console.warn("Couldn't read the vehicle list", err)
@@ -940,6 +947,10 @@ function vehicleBodyHtml(state) {
 
     ${statsGridHtml(summary, totalServiceCostCents(state.services))}
 
+    <div class="action-row">
+      <button class="plan-btn" data-act="open-schedule">🗓️ Service schedule</button>
+    </div>
+
     <div class="section-title row-title">
       <span>Service</span>
       <div class="heading-actions">
@@ -1263,6 +1274,9 @@ function handleVehicleAction(action, id, state) {
       return openFillupForm(state, state.fillups.find((f) => f.id === id) || null);
     case "log-service":
       return openAddServiceMenu(state, odometerMiles);
+    case "open-schedule":
+      location.search = `?vehicle=${encodeURIComponent(state.id)}&schedule`;
+      return null;
     // Straight to the sheet rather than through the menu: a job you've decided
     // on doesn't need to be asked whether it's already been done.
     case "add-service":
@@ -1846,15 +1860,13 @@ function openVehicleMenu(state) {
   openPickerModal({
     title: state.vehicle.name,
     options: [
-      { value: "schedule", label: "Service schedule" },
       { value: "edit", label: "Edit details" },
       { value: "import", label: "Import from a spreadsheet" },
       { value: "qr", label: "Show QR code" },
       { value: "delete", label: "Delete vehicle" },
     ],
   }).then((choice) => {
-    if (choice === "schedule") location.search = `?vehicle=${state.id}&schedule`;
-    else if (choice === "edit") openEditVehicleForm(state);
+    if (choice === "edit") openEditVehicleForm(state);
     else if (choice === "import") chooseImport(state);
     else if (choice === "qr") openQrModal(location.href, `Scan to open ${state.vehicle.name}`);
     else if (choice === "delete") deleteVehicle(state);
@@ -1995,7 +2007,7 @@ function scheduleBodyHtml(state) {
 
   return `
     <div class="page-head">
-      <h1><span class="emoji">🔧</span>Service schedule</h1>
+      <h1><span class="emoji">🗓️</span>Service schedule</h1>
       <button class="secondary small" data-act="add-plan">+ Add a service</button>
     </div>
     <p class="hint">${escapeHtml(state.vehicle.name)} · ${formatMiles(odometerMiles)} on the odometer.
