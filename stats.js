@@ -475,18 +475,12 @@ export function dateAfterDays(days, today = new Date()) {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
 }
 
-// Everything due within the next `months`, across every vehicle, soonest first.
-// A row that can only be dated by projection says so; one that can't be dated
-// at all is handed back separately rather than being guessed at.
-export function upcomingWork(vehicles, { months = 12, today = new Date() } = {}) {
-  const horizon = addMonthsISO(dateAfterDays(0, today), months);
-  // Anything already due is collected on its own rather than grouped under the
-  // month it fell in. Those months are behind you -- and a job never logged on
-  // an older vehicle is dated from that vehicle's age, which can be years back.
-  // Heading the page with "January 2017" would bury the work actually ahead.
+// What's asking for attention across the whole garage: everything overdue and
+// everything due soon, each group soonest-first. Nothing further out -- the
+// point of this list is what you'd otherwise forget, not the whole year.
+export function upcomingWork(vehicles, { today = new Date() } = {}) {
   const overdue = [];
-  const dated = [];
-  const undated = [];
+  const soon = [];
 
   for (const vehicle of vehicles) {
     const services = vehicle.services || [];
@@ -563,21 +557,23 @@ export function upcomingWork(vehicles, { months = 12, today = new Date() } = {})
 
       entry.status = status;
 
-      // And it isn't subject to the window: switching to six months narrows
-      // what's ahead, not what you're already late for.
+      // Only what's asking for attention. Work comfortably ahead is real, but
+      // it belongs on the vehicle's own page: a garage screen that lists it
+      // buries the two jobs you actually have to deal with.
       if (status.key === "overdue") overdue.push(entry);
-      else if (!on) undated.push(entry);
-      else if (on <= horizon) dated.push(entry);
+      else if (status.key === "soon") soon.push(entry);
     }
   }
 
+  // A job with no date to sort by goes last in its group rather than first,
+  // which is what an empty string would do.
   const soonestFirst = (a, b) =>
-    String(a.on).localeCompare(String(b.on)) || String(a.vehicleName).localeCompare(String(b.vehicleName));
+    String(a.on || "9999").localeCompare(String(b.on || "9999")) ||
+    String(a.vehicleName).localeCompare(String(b.vehicleName));
   // Oldest first among the overdue, which is longest-overdue first.
   overdue.sort(soonestFirst);
-  dated.sort(soonestFirst);
-  undated.sort((a, b) => (a.milesAway ?? Infinity) - (b.milesAway ?? Infinity));
-  return { horizon, overdue, dated, undated };
+  soon.sort(soonestFirst);
+  return { overdue, soon };
 }
 
 // Everything the coming work asks for, against what's on the shelf.

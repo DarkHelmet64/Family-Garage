@@ -1145,31 +1145,69 @@ input[type="file"] {
   border-top: 1px solid var(--border);
 }
 
-.coming-up-head {
+#coming-up h2 {
+  font-size: 1.15rem;
+  margin: 0 0 12px;
+}
+
+#coming-up h2 .emoji { margin-right: 6px; }
+
+/* A count that opens. Coloured by what it counts, so how bad it is reads
+   before the number does. */
+.status-group {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  flex-wrap: wrap;
-  margin-bottom: 12px;
-}
-
-.coming-up-head h2 {
-  font-size: 1.15rem;
-  margin: 0;
-}
-
-.coming-up-head h2 .emoji { margin-right: 6px; }
-
-.window-picker {
-  display: flex;
   gap: 8px;
+  width: 100%;
+  text-align: left;
+  margin-bottom: 8px;
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--card);
+  color: var(--text);
+  font-weight: 600;
+  font-size: 0.9rem;
 }
 
-.window-picker button.chosen {
-  background: var(--brand);
-  color: white;
-  border-color: var(--brand);
+.status-group:active { background: var(--bg); }
+
+.status-caret {
+  color: var(--muted);
+  font-size: 0.75rem;
+  width: 10px;
+}
+
+.status-name { flex: 1 1 auto; }
+
+.status-count {
+  min-width: 24px;
+  text-align: center;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 0.85rem;
+}
+
+.status-group.overdue {
+  box-shadow: inset 4px 0 0 var(--red);
+  border-color: var(--red-border);
+  background: var(--red-bg);
+}
+.status-group.overdue .status-name { color: var(--red); }
+.status-group.overdue .status-count { background: var(--red); color: white; }
+
+.status-group.soon {
+  box-shadow: inset 4px 0 0 var(--amber);
+  border-color: var(--amber-border);
+  background: var(--amber-bg);
+}
+.status-group.soon .status-name { color: var(--amber); }
+.status-group.soon .status-count { background: var(--amber); color: white; }
+
+/* The jobs behind a count sit indented under it, so the count stays the thing
+   you scan and they read as its contents. */
+.status-jobs {
+  margin: -2px 0 12px 14px;
 }
 
 .plan-row { margin-bottom: 8px; }
