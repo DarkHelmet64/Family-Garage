@@ -525,7 +525,10 @@ It opens as a set of counts, by vehicle and by status:
 **Tap a count** and it expands to the jobs behind it — a name and an **Open**
 button each. Tap again to close it. Counts open independently, so you can have
 one car's overdue list open beside another's, and the whole thing collapses back
-to four lines. The vehicle you're furthest behind on heads the list.
+to four lines.
+
+Vehicles come in the same order as the cards above — by name, so the two lists
+on this screen read down together and neither shuffles as the numbers change.
 
 Everything else a job knows — its date, its mileage, what it needs off the
 shelf, whether that date was measured or assumed — is one tap away behind

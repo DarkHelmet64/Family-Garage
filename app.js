@@ -126,6 +126,11 @@ function siteUrl() {
   return url.toString();
 }
 
+// The order vehicles are listed in, wherever they're listed. By name, so it
+// doesn't shift about as the numbers change -- and shared, so the garage
+// screen's two lists can't disagree about which car comes first.
+const byVehicleName = (a, b) => String(a.name || "").localeCompare(String(b.name || ""));
+
 function vehicleSubtitle(data) {
   return [data.year, data.make, data.model].filter(Boolean).join(" ");
 }
@@ -164,7 +169,7 @@ function renderGarageView() {
       }
       const vehicles = [];
       snap.forEach((docSnap) => vehicles.push({ id: docSnap.id, ...docSnap.data() }));
-      vehicles.sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")));
+      vehicles.sort(byVehicleName);
 
       listEl.innerHTML = vehicles.map(vehicleCardHtml).join("");
       refreshStaleSummaries(vehicles);
@@ -354,8 +359,8 @@ function renderComingUp(state) {
     return;
   }
 
-  // By vehicle, then by status within it. Vehicles appear in the order their
-  // most pressing job did, so the one you're furthest behind on heads the list.
+  // By vehicle, then by status within it -- in the same order as the vehicle
+  // cards above, so the two lists on this screen read down together.
   const byVehicle = new Map();
   for (const row of [...overdue, ...soon]) {
     if (!byVehicle.has(row.vehicleId)) {
@@ -365,6 +370,7 @@ function renderComingUp(state) {
   }
 
   const sections = [...byVehicle.values()]
+    .sort(byVehicleName)
     .map(
       (vehicle) => `
       <div class="section-title">${escapeHtml(vehicle.name)}</div>
@@ -486,7 +492,7 @@ function renderPartsView() {
     collection(db, "vehicles"),
     (snap) => {
       state.vehicles = snap.docs.map((d) => ({ id: d.id, name: d.data().name }));
-      state.vehicles.sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")));
+      state.vehicles.sort(byVehicleName);
       if (state.parts.length) drawParts(listEl, state);
     },
     (err) => console.warn("Couldn't read the vehicle list", err)
