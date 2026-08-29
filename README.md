@@ -13,8 +13,8 @@ home.
 
 - **Garage** (the site's root URL): every vehicle with its average MPG, its
   odometer, and a badge when something is **due soon** or **overdue** — and
-  below that, **Coming up**: everything due across the whole garage, and what
-  it needs off the shelf. See [What's coming up](#whats-coming-up).
+  below that, **Coming up**: what's overdue and due soon across the whole
+  garage, counted by vehicle. See [What's coming up](#whats-coming-up).
 - Every action sits at the top of what it acts on rather than under it: a
   page's own action beside its heading (**More** on the garage, **+ Add a
   service** on the schedule, **+ Add a part** on the shelf), and a section's on
@@ -389,7 +389,7 @@ Log the job once and the assumption is gone — the real date takes over.
 A vehicle with **no model year** has no such date to fall back on. Those entries
 stay as they were: "not logged yet", with no next-due, until you log one.
 
-These jobs appear in [What's coming up](#whats-coming-up) too, where a job
+These jobs are counted in [What's coming up](#whats-coming-up) too, where one
 counted from the vehicle's age reads as **overdue** like any other — which, on a
 2016 car, it is.
 
@@ -508,40 +508,37 @@ with one tap.
 
 ## What's coming up
 
-Under the vehicle list on the garage screen, **Coming up** looks across the
-whole garage: everything due in the next **6 or 12 months**, whether it was
-booked in or is simply what a vehicle's schedule implies next. It's there as
-soon as you open the site rather than behind a menu.
+Under the vehicle list on the garage screen, **Coming up** is the whole garage's
+attention list: everything **overdue** and everything **due soon**, and nothing
+else. Work comfortably ahead is real, but it belongs on the vehicle's own page —
+a garage screen that lists all of it buries the two jobs you actually have to
+deal with.
 
-It's deliberately short — a name, how it stands, and a way in:
+It opens as a set of counts, by vehicle and by status:
 
 > **BLUE ODYSSEY**
-> Cabin air filter · **overdue** · Open
-> Brake pads · **due soon** · Open
+> ▸ Overdue **3**  ▸ Due soon **2**
 >
 > **RED TACOMA**
-> Oil change · **overdue** · Open
+> ▸ Overdue **1**
 
-**Sectioned by vehicle**, because that's the question a garage screen answers:
-what does each car need. Within a section the worst comes first, and the vehicle
-with the oldest overdue job heads the page. Everything else a job knows — its
-date, its mileage, what it needs off the shelf, whether that date was measured
-or assumed — is one tap away behind **Open**, on the page that owns it.
+**Tap a count** and it expands to the jobs behind it — a name and an **Open**
+button each. Tap again to close it. Counts open independently, so you can have
+one car's overdue list open beside another's, and the whole thing collapses back
+to four lines. The vehicle you're furthest behind on heads the list.
 
-A job you're already late for is listed however far back it went: the 6/12-month
-window narrows what's *coming*, never what you're overdue for. That window is
-still what decides how far ahead to look.
+Everything else a job knows — its date, its mileage, what it needs off the
+shelf, whether that date was measured or assumed — is one tap away behind
+**Open**, on the page that owns it.
 
-At the top is **To buy** — everything the coming work needs, added up across
-jobs and set against the shelf, so a Saturday oil change doesn't stall on a
-filter nobody bought. It counts overdue work too; a late oil change needs its
-oil just as much.
+"Due soon" is the same 30 days or 500 miles the badges use everywhere else,
+whichever falls first. To decide it, a job due on mileage is still turned into a
+date using how fast that vehicle has actually been driven; only miles still to
+drive can be dated that way, so a job you're already past is simply overdue.
 
-Behind the scenes a job due on mileage is still turned into a date, using how
-fast that vehicle has actually been driven, to decide where in the next 6 or 12
-months it falls. Only miles still to drive can be dated that way — a job you're
-already past is simply overdue. A vehicle without enough fill-ups to measure
-gets no guess, and its mileage-only jobs sit at the end of their vehicle's list.
+At the top is **To buy** — everything this work needs, added up across jobs and
+set against the shelf, so a Saturday oil change doesn't stall on a filter nobody
+bought.
 
 Working this out needs every vehicle's schedule, services and fill-ups, which
 the vehicle list itself doesn't — so it's read after the list has been asked

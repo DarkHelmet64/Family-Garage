@@ -142,13 +142,7 @@ function renderGarageView() {
     </div>
     <div id="vehicle-list"><p class="loading">Loading…</p></div>
     <section id="coming-up" hidden>
-      <div class="coming-up-head">
-        <h2><span class="emoji">📅</span>Coming up</h2>
-        <div class="window-picker">
-          <button class="secondary small" data-act="window" data-id="6">6 months</button>
-          <button class="secondary small" data-act="window" data-id="12">12 months</button>
-        </div>
-      </div>
+      <h2><span class="emoji">📅</span>Coming up</h2>
       <div id="coming-up-body"><p class="loading small">Reading the whole garage…</p></div>
     </section>
   `;
@@ -287,15 +281,17 @@ function openGarageMenu() {
 // ---------------------------------------------------------------------------
 
 function mountComingUp() {
-  const state = { months: 12, vehicles: [], parts: [], loaded: false };
+  // Which counts have been opened, by vehicle and status. Kept here rather than
+  // in the DOM so a redraw doesn't shut everything you'd opened.
+  const state = { vehicles: [], parts: [], loaded: false, expanded: new Set() };
 
   $app.addEventListener("click", (event) => {
-    const target = event.target.closest("[data-act]");
+    const target = event.target.closest("[data-act=toggle-group]");
     if (!target) return;
-    if (target.dataset.act === "window") {
-      state.months = Number(target.dataset.id);
-      renderComingUp(state);
-    }
+    const key = target.dataset.id;
+    if (state.expanded.has(key)) state.expanded.delete(key);
+    else state.expanded.add(key);
+    renderComingUp(state);
   });
 
   loadGarage()
@@ -343,47 +339,47 @@ async function loadGarage() {
 
 function renderComingUp(state) {
   const bodyEl = document.getElementById("coming-up-body");
-  document.querySelectorAll("[data-act=window]").forEach((button) => {
-    button.classList.toggle("chosen", Number(button.dataset.id) === state.months);
-  });
   if (!state.loaded) return;
 
   const today = new Date();
-  const { overdue, dated, undated } = upcomingWork(state.vehicles, { months: state.months, today });
-  // The shopping list covers what you're late for as well as what's ahead --
-  // an overdue oil change needs its oil just as much.
-  const forecast = partsForecast([...overdue, ...dated], state.parts);
+  const { overdue, soon } = upcomingWork(state.vehicles, { today });
+  // The shopping list covers what you're late for as well as what's nearly due
+  // -- an overdue oil change needs its oil just as much.
+  const forecast = partsForecast([...overdue, ...soon], state.parts);
   const shortages = forecast.filter((need) => need.short > 0);
 
-  if (!overdue.length && !dated.length && !undated.length) {
-    bodyEl.innerHTML = `<p class="empty small">Nothing due in the next ${state.months} months. Add intervals on a
-      vehicle's <strong>Service schedule</strong>, or book a job in, and it'll show up here.</p>`;
+  if (!overdue.length && !soon.length) {
+    bodyEl.innerHTML = `<p class="empty small">Nothing overdue or due soon. Anything further out is on
+      each vehicle's own page.</p>`;
     return;
   }
 
-  // Most pressing first across the whole garage, then split by vehicle keeping
-  // that order -- so the car with the oldest overdue job heads the section, and
-  // each one's own list still reads worst-first.
+  // By vehicle, then by status within it. Vehicles appear in the order their
+  // most pressing job did, so the one you're furthest behind on heads the list.
   const byVehicle = new Map();
-  for (const row of [...overdue, ...dated, ...undated]) {
-    if (!byVehicle.has(row.vehicleId)) byVehicle.set(row.vehicleId, { name: row.vehicleName, rows: [] });
-    byVehicle.get(row.vehicleId).rows.push(row);
+  for (const row of [...overdue, ...soon]) {
+    if (!byVehicle.has(row.vehicleId)) {
+      byVehicle.set(row.vehicleId, { id: row.vehicleId, name: row.vehicleName, overdue: [], soon: [] });
+    }
+    byVehicle.get(row.vehicleId)[row.status.key].push(row);
   }
 
-  const timeline = [...byVehicle.values()]
+  const sections = [...byVehicle.values()]
     .map(
-      (vehicle) => `<div class="section-title">${escapeHtml(vehicle.name)}</div>
-         <div class="list">${vehicle.rows.map(planRowHtml).join("")}</div>`
+      (vehicle) => `
+      <div class="section-title">${escapeHtml(vehicle.name)}</div>
+      ${statusGroupHtml(vehicle, "overdue", "Overdue", state.expanded)}
+      ${statusGroupHtml(vehicle, "soon", "Due soon", state.expanded)}`
     )
     .join("");
 
   bodyEl.innerHTML = `
-    <p class="hint">${
-      overdue.length
-        ? `${overdue.length} job${overdue.length === 1 ? "" : "s"} already due, and ${dated.length} in the next
-           ${state.months} months.`
-        : `${dated.length} job${dated.length === 1 ? "" : "s"} due in the next ${state.months} months.`
-    } Open a vehicle for the dates, the mileages, and what each job needs off the shelf.</p>
+    <p class="hint">${[
+      overdue.length ? `${overdue.length} overdue` : null,
+      soon.length ? `${soon.length} due soon` : null,
+    ]
+      .filter(Boolean)
+      .join(" · ")}. Tap a count to see the jobs; open a vehicle for their dates and mileages.</p>
 
     ${
       shortages.length
@@ -403,7 +399,26 @@ function renderComingUp(state) {
           : ""
     }
 
-    ${timeline}
+    ${sections}
+  `;
+}
+
+// A count you can open. Closed it answers "how bad is it" in one line; opened
+// it lists the jobs behind the number.
+function statusGroupHtml(vehicle, key, label, expanded) {
+  const rows = vehicle[key];
+  if (!rows.length) return "";
+
+  const id = `${vehicle.id}:${key}`;
+  const open = expanded.has(id);
+  return `
+    <button class="status-group ${key}" data-act="toggle-group" data-id="${escapeHtml(id)}"
+            aria-expanded="${open}">
+      <span class="status-caret">${open ? "▾" : "▸"}</span>
+      <span class="status-name">${escapeHtml(label)}</span>
+      <span class="status-count">${rows.length}</span>
+    </button>
+    ${open ? `<div class="list status-jobs">${rows.map(planRowHtml).join("")}</div>` : ""}
   `;
 }
 
@@ -414,7 +429,6 @@ function planRowHtml(row) {
         <span class="row-title-text">${escapeHtml(row.title)}</span>
       </div>
       <div class="row-side">
-        <span class="badge ${row.status.key}">${escapeHtml(row.status.label)}</span>
         <a class="ghost btn" href="?vehicle=${encodeURIComponent(row.vehicleId)}">Open</a>
       </div>
     </div>
