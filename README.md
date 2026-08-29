@@ -353,7 +353,8 @@ for.
 
 ### The service schedule
 
-**More > Service schedule** is where you say how often each job comes round on
+**🗓️ Service schedule**, above the Service section on a vehicle's page, is
+where you say how often each job comes round on
 *this* vehicle — every 5,000 miles, every 6 months, or both, whichever falls
 first. Intervals belong to the vehicle because they differ: a van that tows
 wants its oil changed sooner than a car doing the school run, and two vehicles
@@ -454,7 +455,7 @@ can, and it names the fix rather than failing quietly.
 
 ## Parts and supplies
 
-**More > 🔩 Parts & supplies** from the garage screen is one shelf for the whole
+**🔩 Parts & supplies**, under the vehicles on the garage screen, is one shelf for the whole
 household — a case of oil gets used on whichever car needs it, so parts aren't
 owned by a vehicle. Each item has a name, and optionally a **brand**, a
 **category**, a part number, what it costs, and the level to keep it above.

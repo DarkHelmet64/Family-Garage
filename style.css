@@ -18,6 +18,13 @@
   --red-border: #f3c9c8;
   --fuel: #7b4bd8;
   --fuel-dark: #6237bb;
+  /* The other two things you come here to do, alongside the pump's purple and
+     service's blue -- and clear of the green, amber and red, which mean
+     something about a job's state rather than naming a place to go. */
+  --plan: #0e7c86;
+  --plan-dark: #0a626a;
+  --shelf: #a8377e;
+  --shelf-dark: #8c2c69;
   --radius: 14px;
 }
 
@@ -45,6 +52,10 @@
     --red-border: #5a2c2d;
     --fuel: #a480f0;
     --fuel-dark: #8d63e6;
+    --plan: #33b3bd;
+    --plan-dark: #2a97a0;
+    --shelf: #d97ab5;
+    --shelf-dark: #c667a2;
   }
 }
 
@@ -148,7 +159,9 @@ button, .btn {
 
 button:active, .btn:active { background: var(--brand-dark); }
 
-button.secondary {
+/* Also applies to links styled as buttons, like "Parts & supplies" on the
+   garage screen. */
+button.secondary, a.btn.secondary {
   background: transparent;
   color: var(--brand);
   border: 1px solid var(--brand);
@@ -395,11 +408,15 @@ button:disabled { opacity: 0.5; cursor: default; }
   margin: 4px 0 6px;
 }
 
-.action-row button { flex: 1; }
+.action-row button, .action-row .btn { flex: 1; }
 
 .fuel-btn { background: var(--fuel); }
 .fuel-btn:active { background: var(--fuel-dark); }
 .service-btn { background: var(--brand); }
+.plan-btn { background: var(--plan); }
+.plan-btn:active { background: var(--plan-dark); }
+.shelf-btn { background: var(--shelf); }
+.shelf-btn:active { background: var(--shelf-dark); }
 
 /* Stat grid -------------------------------------------------------------- */
 
