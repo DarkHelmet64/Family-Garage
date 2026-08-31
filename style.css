@@ -1140,22 +1140,21 @@ input[type="file"] {
 /* Under a row in the parts picker, when the shelf can't cover it. */
 .field-hint.short { color: var(--amber); }
 
-/* Where the shelf's figure for the booked parts gets dropped. */
-.parts-apply {
+/* Which job a booked part went on, under the part it belongs to. */
+.part-job {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
   gap: 8px;
-  margin-top: 8px;
+  margin-top: 6px;
 }
 
-.parts-apply-label {
+.part-job-label {
   font-size: 0.8rem;
   color: var(--muted);
 }
 
-.parts-apply select {
-  flex: 1 1 140px;
+.part-job select {
+  flex: 1 1 auto;
   min-width: 0;
 }
 
