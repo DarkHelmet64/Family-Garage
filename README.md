@@ -458,7 +458,7 @@ can, and it names the fix rather than failing quietly.
 **🔩 Parts & supplies**, under the vehicles on the garage screen, is one shelf for the whole
 household — a case of oil gets used on whichever car needs it, so parts aren't
 owned by a vehicle. Each item has a name, and optionally a **brand**, a
-**category**, a **part number**, a **model number**, who you **bought it
+**category**, a **part number**, a **model**, a **size**, who you **bought it
 from**, what it costs each, and the level to keep it above.
 Anything at or below that level is flagged as running low, and the row has **+**
 and **−** for a quick recount. Brands, categories and vendors you've already
@@ -504,23 +504,27 @@ recount puts it right.
 ### What the parts cost, on the record
 
 A service sheet works out what the parts you've booked cost, from each one's
-**cost each** on the shelf:
+**cost each** on the shelf, and puts each part's cost on **the job it went on**:
 
 > **Parts used**
-> 0W-20 oil (8 qt) × 5 — *$8.99 each = $44.95*
-> Oil filter (4 each) × 1 — *$12.50 each = $12.50*
-> **Parts $57.45** → Put $57.45 against ⌄ Oil change
+> 0W-20 oil (8 qt) × 5 — for ⌄ **Oil change** — *$8.99 each = $44.95*
+> Oil filter (4 each) × 1 — for ⌄ **Oil change** — *$12.50 each = $12.50*
+> Wiper blades (2 pair) × 1 — for ⌄ **Wiper blades** — *$18.00 each = $18.00*
+> **Parts $75.45**
 
-**One job on the sheet and it goes there**, since that isn't a choice. Several
-and you say which — the sheet can't know whether the oil belongs to the oil
-change or to the brake job that happened alongside it. Change your mind and the
-figure **moves**: it comes off the line you picked before rather than being
-counted twice.
+A trip to the shop is several jobs and the parts belong to particular ones — the
+oil and the filter to the oil change, the blades to the wiper job — so each part
+names its own. **One job on the sheet and there's nothing to ask**: everything
+goes to it, and the picker doesn't appear. Move a part to a different job and
+the money moves with it, off one line and onto the other.
 
 A part with no cost recorded adds nothing, and with no priced parts at all the
 cost is simply left blank — nothing is invented. Change the parts afterwards and
-the line follows, unless you've typed a figure over it yourself, in which case
+the lines follow, unless you've typed a figure over one yourself, in which case
 that one stands: the receipt beats the shelf.
+
+Which job each part went on is saved with the record, so reopening a visit puts
+every part back against its own job.
 
 ### What the record keeps
 
@@ -528,7 +532,7 @@ A saved record says which part it was, not just how many:
 
 > Used 5 × 0W-20 oil (M1-0W20, from NAPA), 1 × Oil filter
 
-The name, unit, model number and vendor are copied onto the record rather than
+The name, unit, model, size and vendor are copied onto the record rather than
 looked up from the shelf each time it's read. Edit a shelf entry, rename it, or
 take it off the list entirely, and the record still says what was actually used
 and where it came from. Parts with no model or vendor recorded read exactly as

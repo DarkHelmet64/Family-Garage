@@ -579,6 +579,7 @@ function partRowHtml(part, vehicles = []) {
     part.brand || null,
     part.partNumber ? `#${part.partNumber}` : null,
     part.modelNumber ? `model ${part.modelNumber}` : null,
+    part.size || null,
     part.vendor ? `from ${part.vendor}` : null,
     part.unitCostCents ? `${formatUSD(part.unitCostCents)} each` : null,
     part.minQuantity ? `keep ${part.minQuantity}+` : null,
@@ -669,11 +670,20 @@ async function openPartForm(existing, state) {
       },
       {
         name: "modelNumber",
-        label: "Model number (optional)",
+        label: "Model (optional)",
         type: "text",
         half: true,
         value: existing?.modelNumber || "",
         placeholder: "XG7317",
+      },
+      {
+        name: "size",
+        label: "Size (optional)",
+        type: "text",
+        half: true,
+        value: existing?.size || "",
+        placeholder: "5W-30, 22 in",
+        suggestions: usedValues(state.parts, "size"),
       },
       {
         name: "vendor",
@@ -763,6 +773,7 @@ async function openPartForm(existing, state) {
     brand: values.brand || null,
     category: values.category || null,
     modelNumber: values.modelNumber || null,
+    size: values.size || null,
     vendor: values.vendor || null,
     fitsVehicleIds: values.fitsVehicleIds || [],
     partNumber: values.partNumber || null,
@@ -1178,7 +1189,7 @@ function repairDerivedTitles(vehicleId, services) {
 const partsSummary = (parts) =>
   parts
     .map((used) => {
-      const detail = [used.modelNumber || null, used.vendor ? `from ${used.vendor}` : null]
+      const detail = [used.modelNumber || null, used.size || null, used.vendor ? `from ${used.vendor}` : null]
         .filter(Boolean)
         .join(", ");
       return `${used.quantity} × ${used.name}${detail ? ` (${detail})` : ""}`;
