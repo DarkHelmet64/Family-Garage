@@ -169,7 +169,15 @@ export function openFormModal({ title, hint, fields, submitLabel = "Save", valid
     const listState = new Map();
     for (const field of fields) {
       if (field.type === "list") listState.set(field.name, bindListField(overlay, field));
-      if (field.type === "parts") listState.set(field.name, bindPartsField(overlay, field));
+    }
+    for (const field of fields) {
+      if (field.type !== "parts") continue;
+      const parts = bindPartsField(overlay, field);
+      listState.set(field.name, parts);
+      // A parts field naming a list field can hand it what the shelf says
+      // those parts cost. Bound after the list fields so it's there to name.
+      const lines = field.appliesTo && listState.get(field.appliesTo);
+      if (lines && lines.lines) parts.useLines(lines);
     }
 
     // Bound before the Enter-to-submit handler below, so that when the panel is
@@ -273,7 +281,9 @@ function renderField(field) {
         <div class="item-list" data-parts-rows="${escapeHtml(name)}"></div>
         <div class="item-list-foot">
           <button type="button" class="secondary small" data-parts-add="${escapeHtml(name)}">+ Add part</button>
+          <span class="item-total" data-parts-total="${escapeHtml(name)}"></span>
         </div>
+        <div class="parts-apply" data-parts-apply="${escapeHtml(name)}" hidden></div>
         ${hintHtml}
       </div>`;
   }
@@ -388,7 +398,12 @@ function partOptionsHtml(catalogue, selectedId, vehicleId) {
 function bindPartsField(overlay, field) {
   const rowsEl = overlay.querySelector(`[data-parts-rows="${field.name}"]`);
   const addButton = overlay.querySelector(`[data-parts-add="${field.name}"]`);
+  const totalEl = overlay.querySelector(`[data-parts-total="${field.name}"]`);
+  const applyEl = overlay.querySelector(`[data-parts-apply="${field.name}"]`);
   const catalogue = field.catalogue || [];
+  // Set by openFormModal when this field names a list field to hand its total
+  // to. Without one the picker behaves exactly as it did.
+  let lineField = null;
 
   let rows = (field.value || []).map((used) => ({
     partId: used.partId || "",
@@ -400,6 +415,89 @@ function bindPartsField(overlay, field) {
       partId: row.querySelector("[data-part-id]").value,
       quantity: row.querySelector("[data-part-qty]").value,
     }));
+  };
+
+  // What the shelf says a row costs. A part with no cost-each recorded
+  // contributes nothing rather than nothing-at-all: the total is of what's
+  // priced, and rows without a price simply don't show one.
+  const rowCostCents = (row) => {
+    const part = catalogue.find((candidate) => candidate.id === row.partId);
+    const quantity = Number(row.quantity);
+    if (!part || !part.unitCostCents || !Number.isFinite(quantity)) return null;
+    return part.unitCostCents * quantity;
+  };
+
+  const totalCents = () => rows.reduce((sum, row) => sum + (rowCostCents(row) || 0), 0);
+
+  const costLine = (row) => {
+    const part = catalogue.find((candidate) => candidate.id === row.partId);
+    return `${formatUSD(part.unitCostCents)} each = ${formatUSD(rowCostCents(row))}`;
+  };
+
+  // Which line the parts figure was last put on, and what was put there. Kept
+  // so the figure can move rather than multiply: choosing a different job takes
+  // it off the old one, and changing the parts updates wherever it landed.
+  let appliedTo = null;
+  let appliedCents = null;
+
+  const asDollars = (cents) => (cents / 100).toFixed(2);
+
+  // Only ever clears a line still holding exactly what was put there. A figure
+  // typed over by hand is the answer, and isn't touched.
+  const untouched = (index) => {
+    const line = lineField.lines().find((candidate) => candidate.index === index);
+    return line && appliedCents !== null && line.cost === asDollars(appliedCents);
+  };
+
+  const applyTo = (index, cents) => {
+    if (appliedTo !== null && appliedTo !== index && untouched(appliedTo)) lineField.setCost(appliedTo, "");
+    lineField.setCost(index, asDollars(cents));
+    appliedTo = index;
+    appliedCents = cents;
+  };
+
+  // The total, and where to put it. Only one job line and it goes there without
+  // asking; several and you say which, because the sheet can't know whether the
+  // oil belongs to the oil change or to the service that happened alongside it.
+  const renderFoot = () => {
+    const cents = totalCents();
+    totalEl.textContent = cents ? `Parts ${formatUSD(cents)}` : "";
+
+    const lines = lineField && cents ? lineField.lines().filter((line) => line.title) : [];
+    if (!lines.length) {
+      applyEl.hidden = true;
+      applyEl.innerHTML = "";
+      return;
+    }
+
+    // A line already carrying this figure follows the parts as they change,
+    // rather than being left holding a total that no longer adds up.
+    if (appliedTo !== null && cents !== appliedCents && untouched(appliedTo)) {
+      lineField.setCost(appliedTo, asDollars(cents));
+      appliedCents = cents;
+    }
+
+    const chosen = appliedTo !== null && lines.some((line) => line.index === appliedTo) ? String(appliedTo) : "";
+    applyEl.hidden = false;
+    applyEl.innerHTML = `
+      <span class="parts-apply-label">Put ${escapeHtml(formatUSD(cents))} against</span>
+      <select data-parts-apply-pick>
+        <option value="" ${chosen === "" ? "selected" : ""}>— choose a job —</option>
+        ${lines
+          .map(
+            (line) =>
+              `<option value="${line.index}" ${chosen === String(line.index) ? "selected" : ""}>${escapeHtml(line.title)}</option>`
+          )
+          .join("")}
+      </select>`;
+
+    const pick = applyEl.querySelector("[data-parts-apply-pick]");
+    // One job on the sheet is not a choice, so it's made for you.
+    if (lines.length === 1 && appliedTo === null) applyTo(lines[0].index, cents);
+    pick.addEventListener("change", () => {
+      if (pick.value === "") return;
+      applyTo(Number(pick.value), totalCents());
+    });
   };
 
   const shortfall = (row) => {
@@ -424,6 +522,11 @@ function bindPartsField(overlay, field) {
                    placeholder="Qty" value="${escapeHtml(row.quantity)}" />
             <button type="button" class="item-remove" data-part-remove="${index}" title="Remove">×</button>
           </div>
+          ${
+            rowCostCents(row)
+              ? `<span class="field-hint">${escapeHtml(costLine(row))}</span>`
+              : ""
+          }
           ${shortfall(row) ? `<span class="field-hint short">${escapeHtml(shortfall(row))}</span>` : ""}
         </div>`
       )
@@ -442,6 +545,7 @@ function bindPartsField(overlay, field) {
         render();
       });
     });
+    renderFoot();
   };
 
   addButton.addEventListener("click", () => {
@@ -453,6 +557,12 @@ function bindPartsField(overlay, field) {
   render();
 
   return {
+    // Wired up by openFormModal once both fields exist.
+    useLines: (controller) => {
+      lineField = controller;
+      controller.onChange(renderFoot);
+      renderFoot();
+    },
     read: () => {
       sync();
       return rows
@@ -461,10 +571,13 @@ function bindPartsField(overlay, field) {
           const part = catalogue.find((candidate) => candidate.id === row.partId) || {};
           return {
             partId: row.partId,
-            // The name is kept alongside the id so a record still reads
-            // properly if the part is later taken off the list.
+            // Kept alongside the id, not looked up from it: what the record
+            // says was used shouldn't change because the shelf entry was later
+            // edited, renamed, or taken off the list altogether.
             name: part.name || "Part",
             unit: part.unit || "each",
+            modelNumber: part.modelNumber || null,
+            vendor: part.vendor || null,
             quantity: Number(row.quantity),
           };
         });
@@ -763,6 +876,25 @@ function bindListField(overlay, field) {
           costCents: row.cost.trim() ? dollarsToCents(row.cost) : null,
           notes: row.notes.trim() || null,
         }));
+    },
+    // What the parts field needs to offer "apply to": what the lines are
+    // called, and a way to put a figure in one of them.
+    lines: () => {
+      sync();
+      return rows.map((row, index) => ({ index, title: row.title.trim(), cost: row.cost.trim() }));
+    },
+    setCost: (index, dollars) => {
+      const input = rowsEl.querySelectorAll("[data-item-cost]")[index];
+      if (!input) return;
+      input.value = dollars;
+      sync();
+      updateTotal();
+    },
+    onChange: (fn) => {
+      // Titles change as they're typed, and the apply-to list has to follow.
+      rowsEl.addEventListener("input", fn);
+      rowsEl.addEventListener("change", fn);
+      addButton.addEventListener("click", fn);
     },
   };
 }

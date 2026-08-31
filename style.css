@@ -1140,6 +1140,25 @@ input[type="file"] {
 /* Under a row in the parts picker, when the shelf can't cover it. */
 .field-hint.short { color: var(--amber); }
 
+/* Where the shelf's figure for the booked parts gets dropped. */
+.parts-apply {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.parts-apply-label {
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.parts-apply select {
+  flex: 1 1 140px;
+  min-width: 0;
+}
+
 .item-row select[data-part-id] { flex: 1 1 auto; min-width: 0; }
 .item-row input[data-part-qty] { flex: 0 0 78px; }
 

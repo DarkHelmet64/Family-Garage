@@ -578,6 +578,8 @@ function partRowHtml(part, vehicles = []) {
   const meta = [
     part.brand || null,
     part.partNumber ? `#${part.partNumber}` : null,
+    part.modelNumber ? `model ${part.modelNumber}` : null,
+    part.vendor ? `from ${part.vendor}` : null,
     part.unitCostCents ? `${formatUSD(part.unitCostCents)} each` : null,
     part.minQuantity ? `keep ${part.minQuantity}+` : null,
   ]
@@ -666,6 +668,23 @@ async function openPartForm(existing, state) {
         placeholder: "PH7317",
       },
       {
+        name: "modelNumber",
+        label: "Model number (optional)",
+        type: "text",
+        half: true,
+        value: existing?.modelNumber || "",
+        placeholder: "XG7317",
+      },
+      {
+        name: "vendor",
+        label: "Bought from (optional)",
+        type: "text",
+        half: true,
+        value: existing?.vendor || "",
+        placeholder: "NAPA",
+        suggestions: usedValues(state.parts, "vendor"),
+      },
+      {
         name: "unit",
         label: "Counted in",
         type: "select",
@@ -743,6 +762,8 @@ async function openPartForm(existing, state) {
     name: values.name,
     brand: values.brand || null,
     category: values.category || null,
+    modelNumber: values.modelNumber || null,
+    vendor: values.vendor || null,
     fitsVehicleIds: values.fitsVehicleIds || [],
     partNumber: values.partNumber || null,
     unit: values.unit || "each",
@@ -1151,7 +1172,18 @@ function repairDerivedTitles(vehicleId, services) {
   }
 }
 
-const partsSummary = (parts) => parts.map((used) => `${used.quantity} × ${used.name}`).join(", ");
+// "5 × 0W-20 oil (M1-0W20, from NAPA)" -- the model and vendor come along so
+// the record says which one it was, and where to get another. Records written
+// before those were kept read as they always did.
+const partsSummary = (parts) =>
+  parts
+    .map((used) => {
+      const detail = [used.modelNumber || null, used.vendor ? `from ${used.vendor}` : null]
+        .filter(Boolean)
+        .join(", ");
+      return `${used.quantity} × ${used.name}${detail ? ` (${detail})` : ""}`;
+    })
+    .join(", ");
 
 // What a booked job still needs off the shelf, and whether it's there. Being
 // short is the thing worth knowing before the day arrives.
@@ -1672,6 +1704,9 @@ async function openCompletedServiceForm(state, existing, odometerMiles, { comple
         value: existing?.parts || (completing ? existing?.partsNeeded : null) || (folding ? partsNeededAcross(folding) : null) || [],
         catalogue: state.parts || [],
         vehicleId: state.id,
+        // What the shelf says these cost can be dropped onto one of the jobs
+        // above, so the receipt doesn't have to be added up by hand.
+        appliesTo: "items",
         hint: "Anything taken off the shelf comes out of the parts list when this is saved.",
       },
       {
