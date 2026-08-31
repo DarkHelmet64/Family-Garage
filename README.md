@@ -458,10 +458,12 @@ can, and it names the fix rather than failing quietly.
 **🔩 Parts & supplies**, under the vehicles on the garage screen, is one shelf for the whole
 household — a case of oil gets used on whichever car needs it, so parts aren't
 owned by a vehicle. Each item has a name, and optionally a **brand**, a
-**category**, a part number, what it costs, and the level to keep it above.
+**category**, a **part number**, a **model number**, who you **bought it
+from**, what it costs each, and the level to keep it above.
 Anything at or below that level is flagged as running low, and the row has **+**
-and **−** for a quick recount. Brands and categories you've already typed are
-offered back as you type, so "Fram" doesn't become "fram" on the next row.
+and **−** for a quick recount. Brands, categories and vendors you've already
+typed are offered back as you type, so "Fram" doesn't become "fram" on the next
+row.
 
 Give things categories and the shelf sorts itself into them, named categories
 first and anything without one at the end. Categorise nothing and it stays the
@@ -498,6 +500,27 @@ undo each other's arithmetic.
 Booking out more than you had leaves a negative count. That's kept rather than
 quietly clamped — it means the count was wrong, and the row says so — and a
 recount puts it right.
+
+### What the parts cost, on the record
+
+A service sheet works out what the parts you've booked cost, from each one's
+**cost each** on the shelf:
+
+> **Parts used**
+> 0W-20 oil (8 qt) × 5 — *$8.99 each = $44.95*
+> Oil filter (4 each) × 1 — *$12.50 each = $12.50*
+> **Parts $57.45** → Put $57.45 against ⌄ Oil change
+
+**One job on the sheet and it goes there**, since that isn't a choice. Several
+and you say which — the sheet can't know whether the oil belongs to the oil
+change or to the brake job that happened alongside it. Change your mind and the
+figure **moves**: it comes off the line you picked before rather than being
+counted twice.
+
+A part with no cost recorded adds nothing, and with no priced parts at all the
+cost is simply left blank — nothing is invented. Change the parts afterwards and
+the line follows, unless you've typed a figure over it yourself, in which case
+that one stands: the receipt beats the shelf.
 
 ### Saying what a scheduled job needs
 
