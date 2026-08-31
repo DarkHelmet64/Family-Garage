@@ -522,6 +522,18 @@ cost is simply left blank — nothing is invented. Change the parts afterwards a
 the line follows, unless you've typed a figure over it yourself, in which case
 that one stands: the receipt beats the shelf.
 
+### What the record keeps
+
+A saved record says which part it was, not just how many:
+
+> Used 5 × 0W-20 oil (M1-0W20, from NAPA), 1 × Oil filter
+
+The name, unit, model number and vendor are copied onto the record rather than
+looked up from the shelf each time it's read. Edit a shelf entry, rename it, or
+take it off the list entirely, and the record still says what was actually used
+and where it came from. Parts with no model or vendor recorded read exactly as
+they always did, and so do records written before any of this existed.
+
 ### Saying what a scheduled job needs
 
 The scheduled-service sheet has **Parts needed**, which is the same picker

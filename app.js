@@ -1172,7 +1172,18 @@ function repairDerivedTitles(vehicleId, services) {
   }
 }
 
-const partsSummary = (parts) => parts.map((used) => `${used.quantity} × ${used.name}`).join(", ");
+// "5 × 0W-20 oil (M1-0W20, from NAPA)" -- the model and vendor come along so
+// the record says which one it was, and where to get another. Records written
+// before those were kept read as they always did.
+const partsSummary = (parts) =>
+  parts
+    .map((used) => {
+      const detail = [used.modelNumber || null, used.vendor ? `from ${used.vendor}` : null]
+        .filter(Boolean)
+        .join(", ");
+      return `${used.quantity} × ${used.name}${detail ? ` (${detail})` : ""}`;
+    })
+    .join(", ");
 
 // What a booked job still needs off the shelf, and whether it's there. Being
 // short is the thing worth knowing before the day arrives.

@@ -571,10 +571,13 @@ function bindPartsField(overlay, field) {
           const part = catalogue.find((candidate) => candidate.id === row.partId) || {};
           return {
             partId: row.partId,
-            // The name is kept alongside the id so a record still reads
-            // properly if the part is later taken off the list.
+            // Kept alongside the id, not looked up from it: what the record
+            // says was used shouldn't change because the shelf entry was later
+            // edited, renamed, or taken off the list altogether.
             name: part.name || "Part",
             unit: part.unit || "each",
+            modelNumber: part.modelNumber || null,
+            vendor: part.vendor || null,
             quantity: Number(row.quantity),
           };
         });
