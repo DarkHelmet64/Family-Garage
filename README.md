@@ -404,6 +404,15 @@ reminder: the next-due figures are worked out from your history every time the
 page opens, so **logging a service moves them on its own**. Shorten an interval
 and every date recalculates on the spot.
 
+An entry can also say **what it needs off the shelf** — the same "Parts
+needed" picker as everywhere else, set on the entry itself rather than typed in
+fresh each time it comes round. Set it once on "Oil change" and every future
+**Add to list** for that job carries it straight onto the booked record — no
+prompt, no extra tap, nothing to remember when you're standing at the shelf
+doing the work. Nothing leaves the shelf at that point; a part is only ever
+actually taken off the shelf once the job is marked done, whenever that ends up
+being.
+
 ### A job you've never logged
 
 There's no last-done to count from, so the vehicle's own beginning stands in:
@@ -437,15 +446,9 @@ step is deliberate: the schedule is a rule about how often something comes
 round, and the service list is what you've actually committed to. You decide
 what you're doing on Saturday, not the interval, so every job can be added; only
 the pressing ones get the green button. A row already on the list says so
-instead of offering to add a second copy.
-
-It asks one thing before adding it: **what it'll need off the shelf**, since a
-schedule entry is just a title and an interval and carries no parts list of its
-own. Leave it blank and tap through — the common case, one tap either way — or
-note a part and it travels with the job: onto its **Needs** line, into **To
-buy** if the shelf's short, and into **Mark done**'s own parts list when you
-get to it, pre-filled rather than typed again. Nothing leaves the shelf at this
-step; that still only happens once the job is actually marked done.
+instead of offering to add a second copy. It's one tap, no questions asked —
+whatever the row already needs off the shelf comes with it; see [the service
+schedule](#the-service-schedule) for where that's set.
 
 Once there's more than one job waiting, the Service section on the vehicle page
 offers **Log as one visit** on its Service heading — see [One visit, several
@@ -636,9 +639,9 @@ three states: what's short, "everything these jobs need is on the shelf" once
 none of it is, or — if not one of the pressing jobs has a parts list at all — a
 line saying so, rather than the card just not appearing. That third state is
 worth knowing on its own: a job the schedule merely implies is due carries no
-parts list of its own until it's actually booked in, whether by hand or with
-[**Add to list**](#the-service-schedule), which is exactly where to give it
-one.
+parts list of its own until it's actually booked in. [Set one on the schedule
+entry](#the-service-schedule) and every future **Add to list** for that job
+brings it along automatically.
 
 Working this out needs every vehicle's schedule, services and fill-ups, which
 the vehicle list itself doesn't — so it's read after the list has been asked

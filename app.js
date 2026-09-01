@@ -2395,7 +2395,7 @@ function scheduleBodyHtml(state) {
     ${
       rows.length
         ? `<div class="list schedule-list">${rows
-            .map((row) => scheduleRowHtml(row, odometerMiles, onTheList))
+            .map((row) => scheduleRowHtml(row, odometerMiles, onTheList, state.parts))
             .join("")}</div>`
         : `<p class="empty small">Nothing set up yet. Add the jobs this vehicle needs on a
            schedule — an oil change every 5,000 miles, an inspection every year — and this page
@@ -2411,7 +2411,7 @@ function intervalText(entry) {
   return parts.join(" or ") || "no interval set";
 }
 
-function scheduleRowHtml(row, odometerMiles, onTheList) {
+function scheduleRowHtml(row, odometerMiles, onTheList, parts) {
   const lastDone = row.lastDone
     ? `last done ${[
         row.lastDone.servicedOn ? formatISO(row.lastDone.servicedOn) : null,
@@ -2447,6 +2447,7 @@ function scheduleRowHtml(row, odometerMiles, onTheList) {
         <span class="row-meta">${escapeHtml(intervalText(row))}</span>
         <span class="row-meta">${escapeHtml(lastDone)}</span>
         ${next}
+        ${partsNeededHtml(row, parts)}
       </div>
       <div class="row-side">
         <span class="badge ${row.status.key}">${escapeHtml(row.status.label)}</span>
@@ -2513,6 +2514,15 @@ async function openPlanForm(state, existing) {
         value: existing?.everyMonths != null ? String(existing.everyMonths) : "",
         placeholder: "6",
       },
+      {
+        name: "partsNeeded",
+        label: "Parts needed (optional)",
+        type: "parts",
+        value: existing?.partsNeeded || [],
+        catalogue: state.parts || [],
+        vehicleId: state.id,
+        hint: "What this job uses every time it comes round. Add to list carries this over onto the booked job — nothing leaves the shelf until it's actually marked done.",
+      },
     ],
     submitLabel: existing ? "Save changes" : "Add it",
     destructive: existing ? { label: "Remove from the schedule" } : null,
@@ -2534,6 +2544,7 @@ async function openPlanForm(state, existing) {
     title: values.title,
     everyMiles: values.everyMiles ? Math.round(Number(values.everyMiles)) : null,
     everyMonths: values.everyMonths ? Math.round(Number(values.everyMonths)) : null,
+    partsNeeded: values.partsNeeded || [],
   };
 
   if (existing) {
@@ -2547,8 +2558,9 @@ async function openPlanForm(state, existing) {
 // Turns a due entry into a real scheduled job, so it appears in the vehicle's
 // service list and on the garage badge alongside anything booked in by hand.
 //
-// A schedule entry carries no parts list of its own -- only a title and an
-// interval -- so `partsNeeded` comes from the caller, not from `entry`.
+// `partsNeeded` comes from the caller rather than being read off `entry`
+// directly -- the schedule page passes the entry's own list, but a caller is
+// free to book the same entry without one.
 // Hands back what it wrote, so a caller holding its own copy of the garage
 // could move the row across without reading it all again.
 async function bookScheduleEntry(vehicleId, entry, services, { partsNeeded = [] } = {}) {
@@ -2581,10 +2593,10 @@ async function bookScheduleEntry(vehicleId, entry, services, { partsNeeded = [] 
   return { id: added.id, ...payload };
 }
 
-// "Add to list" opens straight to this rather than a full schedule-service
-// sheet -- the date and mileage the entry is due by are already decided by
-// the schedule, so the only thing left to ask is what it'll need off the
-// shelf, and only if there's something to ask.
+// One tap, no sheet: everything "Add to list" needs is already decided by the
+// schedule entry itself -- the date or mileage it's due by, and now what it
+// needs off the shelf too, set once on the entry rather than asked again on
+// every occurrence it comes due.
 async function bookPlanEntry(state, id) {
   const odometerMiles = currentOdometer(state.vehicle, state.fillups, state.services);
   const row = scheduleRows(state.schedule, state.services, {
@@ -2593,25 +2605,7 @@ async function bookPlanEntry(state, id) {
     vehicleYear: state.vehicle.year,
   }).find((entry) => entry.id === id);
   if (!row) return;
-
-  const values = await openFormModal({
-    title: `Add "${row.title}" to the list`,
-    fields: [
-      {
-        name: "partsNeeded",
-        label: "Parts needed (optional)",
-        type: "parts",
-        value: [],
-        catalogue: state.parts || [],
-        vehicleId: state.id,
-        hint: "Nothing leaves the shelf until the job is marked done — this is so you know what to have in.",
-      },
-    ],
-    submitLabel: "Add to list",
-  });
-  if (!values) return;
-
-  await bookScheduleEntry(state.id, row, state.services, { partsNeeded: values.partsNeeded || [] });
+  await bookScheduleEntry(state.id, row, state.services, { partsNeeded: row.partsNeeded || [] });
 }
 
 // Moves the shelf by the difference between what a record used to book and what
