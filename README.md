@@ -261,25 +261,21 @@ it carries forward from there.
 
 ## Service
 
-**+ Add** on the Service heading puts one or more jobs on the list at once —
-**+ Add another job** for a second, third, and so on — each just a name ("Oil
-change", "Replace serpentine belt"). They share a due date, a due mileage, or
-both (whichever comes first is what the reminder goes by), and optionally a
-shop and a note. Several jobs due at the same visit save as separate records,
-one per name, so each shows and gets marked done on its own. Parts entered
-here land on the first job listed — add parts to any of the others afterward
-by editing it on its own.
+Tap **🔧 Add service** at the top of the page for either:
 
-Nothing about it has to come from the [service
-schedule](#the-service-schedule). The schedule is for jobs that come round on
-an interval; this is for the one-off — the belt that started squealing, the
-recall letter, the thing you noticed on the drive home. Either way it lands on
-the same list and appears in [What's coming up](#whats-coming-up) as
-**booked**.
-
-Tap **🔧 Add service** at the top of the page instead for either:
-
-- **Schedule something coming up** — the same sheet **+ Add** opens.
+- **Schedule something coming up** — puts one or more jobs on the list at
+  once. **+ Add another job** for a second, third, and so on — each just a
+  name ("Oil change", "Replace serpentine belt"). They share a due date, a
+  due mileage, or both (whichever comes first is what the reminder goes by),
+  and optionally a shop and a note. Several jobs due at the same visit save
+  as separate records, one per name, so each shows and gets marked done on
+  its own. Parts entered here land on the first job listed — add parts to
+  any of the others afterward by editing it on its own. Nothing about it has
+  to come from the [service schedule](#the-service-schedule) — the schedule
+  is for jobs that come round on an interval; this is for the one-off — the
+  belt that started squealing, the recall letter, the thing you noticed on
+  the drive home. Either way it lands on the same list and appears in
+  [What's coming up](#whats-coming-up) as **booked**.
 - **Log service already done** — one trip to the shop, however many jobs it
   covered.
 
@@ -352,7 +348,8 @@ thing.
 Sometimes two records really were one trip — an oil change and a tire rotation
 logged as separate visits when they happened at the same shop on the same day.
 **Combine**, on the Service history heading, turns any picked pair (or more)
-into a single record.
+into a single record. It only appears once you've tapped **Show** — nothing to
+pick from with the list still collapsed.
 
 Tap **Combine**, check the ones that belong together, and tap the button that
 appears once you've picked at least two. The sheet opens with everything already
@@ -368,14 +365,6 @@ visit was first logged. Unlike folding open jobs into a visit, there's no
 partial-match safety valve here: picking the records is already the deliberate
 step, so editing a line before you save changes what it says, not whether its
 source record gets combined in.
-
-#### Logging a visit directly
-
-**+ Add**, next to **Combine** on the Service history heading, opens the
-same sheet **🔧 Add service > ✅ Log service already done** does — for a
-visit you already know happened, entered straight into history without
-going by way of the top of the page. **One trip, several jobs** works here
-too: add a line for each, the same as anywhere else a visit gets logged.
 
 Open services are sorted with the most pressing first and color-coded: red for
 **overdue** (the date has passed, or you've driven past the mileage), amber for
@@ -665,9 +654,11 @@ says which one to buy and where:
 
 With no level set for a part, only actually running out counts, and the line
 says so rather than suggesting a figure nobody gave. A count gone negative —
-more booked out than the shelf held — reads as short of zero, the same
-discrepancy [the shelf page](#parts-and-supplies) already flags for a
-recount.
+more booked out than the shelf held — is a different kind of problem than
+merely running low: the count itself is wrong, not just thin. That line reads
+as short of zero rather than short of a level, turns red the same way [the
+shelf page](#parts-and-supplies) already flags it for a recount, and sorts
+to the top of the list ahead of everything else, however short that is.
 
 **To buy** doesn't care what any job is due for, or when — a part reserved
 for something eight months out counts exactly the same as one for tomorrow,

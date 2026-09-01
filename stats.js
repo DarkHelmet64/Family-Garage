@@ -351,12 +351,18 @@ export function shelfShortages(parts) {
         // been set.
         floor: hasFloor ? floor : null,
         short: hasFloor ? Math.max(0, floor - quantity) : Math.max(0, -quantity),
+        // Gone past zero -- more booked out than the shelf ever held -- is a
+        // different kind of problem than merely being low: the count itself
+        // is now wrong, not just thin.
+        negative: quantity < 0,
         modelNumber: part.modelNumber || null,
         size: part.size || null,
         vendor: part.vendor || null,
       };
     })
-    .sort((a, b) => b.short - a.short || String(a.name).localeCompare(String(b.name)));
+    // Negative first, regardless of how short anything else is -- a shelf
+    // that's actively wrong outranks one that's merely running low.
+    .sort((a, b) => b.negative - a.negative || b.short - a.short || String(a.name).localeCompare(String(b.name)));
 }
 
 // ---------------------------------------------------------------------------

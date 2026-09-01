@@ -1344,6 +1344,15 @@ input[type="file"] {
 
 .shopping-row:last-child { border-bottom: none; }
 
+/* Gone negative outranks merely low -- the same red the shelf page already
+   uses for a count that's actively wrong, not just thin. */
+.shopping-row.negative {
+  box-shadow: inset 4px 0 0 var(--red);
+  background: var(--red-bg);
+  padding-left: 16px;
+  border-bottom-color: var(--red-border);
+}
+
 /* Which one to buy and where, on its own line under the name and the
    shortfall rather than squeezed into a column beside them. */
 .shopping-detail {
@@ -1360,5 +1369,6 @@ input[type="file"] {
 }
 
 .shopping-need .muted { font-weight: 400; }
+.shopping-need.negative { color: var(--red); }
 
 .ok-line { color: var(--green); }

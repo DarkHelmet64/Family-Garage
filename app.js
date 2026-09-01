@@ -750,9 +750,9 @@ function renderComingUp(state) {
         shortages.length
           ? shortages
               .map(
-                (need) => `<div class="shopping-row">
+                (need) => `<div class="shopping-row${need.negative ? " negative" : ""}">
                   <span>${escapeHtml(need.name)}</span>
-                  <span class="shopping-need">${shoppingNeedText(need)}</span>
+                  <span class="shopping-need${need.negative ? " negative" : ""}">${shoppingNeedText(need)}</span>
                   ${
                     shoppingDetail(need)
                       ? `<span class="shopping-detail">${escapeHtml(shoppingDetail(need))}</span>`
@@ -817,8 +817,13 @@ function renderComingUp(state) {
 
 // What to buy, and how many -- once there's a floor to count up to. With
 // none set, "low" only ever means "run out", so there's nothing to suggest
-// beyond that.
+// beyond that. Negative gets its own wording: the count itself is wrong, not
+// just thin, so it reads as a discrepancy rather than a restocking figure.
 function shoppingNeedText(need) {
+  if (need.negative) {
+    const keep = need.floor === null ? "" : `, keep ${need.floor}+`;
+    return `${need.short} ${escapeHtml(need.unit)} short of zero · have ${need.quantity}${keep} — worth a recount`;
+  }
   if (need.floor === null) return `have ${need.quantity} — worth restocking`;
   return `${need.short} ${escapeHtml(need.unit)} short · have ${need.quantity}, keep ${need.floor}+`;
 }
@@ -1430,15 +1435,14 @@ function vehicleBodyHtml(state) {
             ? `<button class="secondary small" data-act="log-visit">Log as one visit</button>`
             : ""
         }
-        <button class="secondary small" data-act="add-service">+ Add</button>
       </div>
     </div>
     ${
       open.length
         ? `<div class="list">${open.map((s) => serviceRowHtml(s, ctx)).join("")}</div>`
-        : `<p class="empty small">Nothing waiting. <strong>+ Add</strong> puts a job on the list — one the
-           schedule doesn't cover, or anything you've decided needs doing — and <strong>Add service</strong>
-           above logs one you've already had done.</p>`
+        : `<p class="empty small">Nothing waiting. <strong>🔧 Add service</strong> above puts a job on the
+           list — one the schedule doesn't cover, or anything you've decided needs doing — or logs one
+           you've already had done.</p>`
     }
 
     ${
@@ -1447,11 +1451,10 @@ function vehicleBodyHtml(state) {
              <span>Service history</span>
              <div class="heading-actions">
                ${
-                 history.length > 1
+                 state.showHistory && history.length > 1
                    ? `<button class="secondary small" data-act="${state.combineMode ? "cancel-combine" : "start-combine"}">${state.combineMode ? "Cancel" : "Combine"}</button>`
                    : ""
                }
-               <button class="secondary small" data-act="add-history">+ Add</button>
                <button class="secondary small" data-act="toggle-history">${state.showHistory ? "Hide" : `Show (${history.length})`}</button>
              </div>
            </div>
@@ -1788,15 +1791,6 @@ function handleVehicleAction(action, id, state) {
     case "open-schedule":
       location.search = `?vehicle=${encodeURIComponent(state.id)}&schedule`;
       return null;
-    // Straight to the sheet rather than through the menu: a job you've decided
-    // on doesn't need to be asked whether it's already been done.
-    case "add-service":
-      return openScheduleServiceForm(state, null, odometerMiles);
-    // Same sheet "✅ Log service already done" opens, reached directly from
-    // the history it's about to join -- no need to go back up to the menu at
-    // the top of the page for something already logged and paid for.
-    case "add-history":
-      return openCompletedServiceForm(state, null, odometerMiles);
     case "log-visit":
       return openCompletedServiceForm(state, null, odometerMiles, {
         folding: openServices(state.services, { odometerMiles, today: new Date(), parts: state.parts || [] }),
@@ -1820,6 +1814,13 @@ function handleVehicleAction(action, id, state) {
       return null;
     case "toggle-history":
       state.showHistory = !state.showHistory;
+      // Combine only makes sense with the rows actually on screen to pick
+      // from -- hiding them mid-pick exits combine mode rather than leaving
+      // it stranded with no visible way back out.
+      if (!state.showHistory) {
+        state.combineMode = false;
+        state.combineSelected = new Set();
+      }
       document.getElementById("vehicle-body").innerHTML = vehicleBodyHtml(state);
       return null;
     case "start-combine":
