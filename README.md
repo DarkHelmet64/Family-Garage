@@ -22,9 +22,10 @@ centered dialog it always has; it was never meant to fill the width.
 ## How it works
 
 - **Garage** (the site's root URL): every vehicle with its average MPG, its
-  odometer, and a badge when something is **due soon** or **overdue** — and
-  below that, **Coming up**: what's overdue and due soon across the whole
-  garage, counted by vehicle. See [What's coming up](#whats-coming-up).
+  odometer, and a badge when something is **due soon**. Overdue work isn't
+  repeated here — it's already the headline of **Coming up** just below: what's
+  overdue and due soon across the whole garage, counted by vehicle. See
+  [What's coming up](#whats-coming-up).
 - Every action sits at the top of what it acts on rather than under it: a
   page's own action beside its heading (**More** on the garage, **+ Add a
   service** on the schedule, **+ Add a part** on the shelf), and a section's on
@@ -369,8 +370,9 @@ source record gets combined in.
 Open services are sorted with the most pressing first and color-coded: red for
 **overdue** (the date has passed, or you've driven past the mileage), amber for
 **due soon** (within 30 days or 500 miles), plain for everything further out.
-The garage list shows the same badge on the vehicle, so you can see the truck
-needs something without opening it.
+The garage list shows the same badge on the vehicle for due-soon work; overdue
+work skips the card — **Coming up** already covers it, so you're not told
+about the same job twice.
 
 When you log a completed service you can also set **do it again in ___ miles**
 or **___ months**. That schedules the next one right then — log an oil change at
