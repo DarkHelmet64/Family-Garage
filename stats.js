@@ -383,6 +383,19 @@ export function lastDoneFor(title, services) {
   })[matches.length - 1];
 }
 
+// What a job actually needs off the shelf: its schedule entry's current
+// parts list if one matches by name, since the schedule entry is the one
+// place that's meant to be edited -- a booked or done record's own copy is
+// only ever a snapshot made the moment it was added to the list, and goes
+// stale the moment the schedule entry changes after that. A job with no
+// matching schedule entry (an ad-hoc one-off) has nowhere else to defer to,
+// so it goes by what it noted for itself.
+export function partsNeededFor(service, schedule) {
+  const wanted = normalizeJob(service.title);
+  const scheduled = (schedule || []).find((entry) => normalizeJob(entry.title) === wanted);
+  return (scheduled ? scheduled.partsNeeded : service.partsNeeded) || [];
+}
+
 // What stands in for a job that has never been logged: the vehicle as it left
 // the factory -- zero miles, on January 1st of its model year. Every interval
 // then has something to count from, so a job never logged on a 2016 car reads
@@ -539,25 +552,16 @@ export function upcomingWork(vehicles, { today = new Date() } = {}) {
 
     const rows = [];
 
-    // What a job needs is set on its schedule entry, not frozen onto the
-    // booked record the moment "Add to list" copies it over -- so editing the
-    // schedule entry's parts keeps reaching the buy list even after the job's
-    // already booked, instead of only until the copy goes stale. A booked job
-    // with no matching schedule entry (an ad-hoc one-off) has nowhere else to
-    // defer to, so it still falls back to what it noted for itself.
-    const scheduleByJob = new Map((vehicle.schedule || []).map((entry) => [normalizeJob(entry.title), entry]));
-
     // Booked jobs first; they're a commitment rather than a rule.
     for (const service of services) {
       if (service.status === "done") continue;
-      const scheduled = scheduleByJob.get(normalizeJob(service.title));
       rows.push({
         source: "booked",
         id: service.id,
         title: service.title,
         dueOn: service.dueOn || null,
         dueOdometerMiles: service.dueOdometerMiles ?? null,
-        partsNeeded: (scheduled ? scheduled.partsNeeded : service.partsNeeded) || [],
+        partsNeeded: partsNeededFor(service, vehicle.schedule),
       });
     }
 
