@@ -1451,6 +1451,7 @@ function vehicleBodyHtml(state) {
                    ? `<button class="secondary small" data-act="${state.combineMode ? "cancel-combine" : "start-combine"}">${state.combineMode ? "Cancel" : "Combine"}</button>`
                    : ""
                }
+               <button class="secondary small" data-act="add-history">+ Add</button>
                <button class="secondary small" data-act="toggle-history">${state.showHistory ? "Hide" : `Show (${history.length})`}</button>
              </div>
            </div>
@@ -1791,6 +1792,11 @@ function handleVehicleAction(action, id, state) {
     // on doesn't need to be asked whether it's already been done.
     case "add-service":
       return openScheduleServiceForm(state, null, odometerMiles);
+    // Same sheet "✅ Log service already done" opens, reached directly from
+    // the history it's about to join -- no need to go back up to the menu at
+    // the top of the page for something already logged and paid for.
+    case "add-history":
+      return openCompletedServiceForm(state, null, odometerMiles);
     case "log-visit":
       return openCompletedServiceForm(state, null, odometerMiles, {
         folding: openServices(state.services, { odometerMiles, today: new Date(), parts: state.parts || [] }),

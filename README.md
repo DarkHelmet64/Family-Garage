@@ -369,6 +369,14 @@ partial-match safety valve here: picking the records is already the deliberate
 step, so editing a line before you save changes what it says, not whether its
 source record gets combined in.
 
+#### Logging a visit directly
+
+**+ Add**, next to **Combine** on the Service history heading, opens the
+same sheet **🔧 Add service > ✅ Log service already done** does — for a
+visit you already know happened, entered straight into history without
+going by way of the top of the page. **One trip, several jobs** works here
+too: add a line for each, the same as anywhere else a visit gets logged.
+
 Open services are sorted with the most pressing first and color-coded: red for
 **overdue** (the date has passed, or you've driven past the mileage), amber for
 **due soon** (within 30 days or 500 miles), plain for everything further out.
