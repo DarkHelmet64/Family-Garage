@@ -50,6 +50,7 @@ import {
   scheduleRows,
   normalizeJob,
   lastDoneFor,
+  partsNeededFor,
   isLowStock,
   upcomingWork,
   partsForecast,
@@ -1291,6 +1292,9 @@ function renderVehicleView(id) {
     (snap) => {
       state.parts = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
       state.parts.sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")));
+      // The service list's own "Needs" line reads the shelf to say what's
+      // short, so a shelf change while this page is open has to redraw it.
+      render();
     },
     (err) => console.warn("Couldn't read the parts list", err)
   );
@@ -1299,9 +1303,11 @@ function renderVehicleView(id) {
     collection(db, "vehicles", id, "schedule"),
     (snap) => {
       state.schedule = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      // Suggestions aside, a booked job's "Needs" line is resolved through
+      // its schedule entry now (see partsNeededFor), so this has to redraw
+      // too -- not just sit there until some other listener happens to.
+      render();
     },
-    // The schedule is a nicety here; if it can't be read, the suggestions are
-    // just a little shorter.
     (err) => console.warn("Couldn't read the service schedule", err)
   );
 }
@@ -1310,7 +1316,7 @@ function vehicleBodyHtml(state) {
   const { vehicle } = state;
   const { entries, summary } = computeFuelStats(state.fillups);
   const odometerMiles = currentOdometer(vehicle, state.fillups, state.services);
-  const ctx = { odometerMiles, today: new Date(), parts: state.parts || [] };
+  const ctx = { odometerMiles, today: new Date(), parts: state.parts || [], schedule: state.schedule || [] };
 
   const open = openServices(state.services, ctx);
   const history = state.services
@@ -1484,7 +1490,7 @@ function serviceRowHtml(service, ctx) {
         <span class="row-meta">${escapeHtml(dueSummary(service, ctx.odometerMiles))}</span>
         ${service.shop ? `<span class="row-meta">${escapeHtml(service.shop)}</span>` : ""}
         ${service.notes ? `<span class="row-note">${escapeHtml(service.notes)}</span>` : ""}
-        ${partsNeededHtml(service, ctx.parts)}
+        ${partsNeededHtml(service, ctx.parts, ctx.schedule)}
         ${photoTagHtml(service)}
       </div>
       <div class="row-side">
@@ -1590,9 +1596,13 @@ const partsSummary = (parts) =>
     .join(", ");
 
 // What a booked job still needs off the shelf, and whether it's there. Being
-// short is the thing worth knowing before the day arrives.
-function partsNeededHtml(service, parts = []) {
-  const needed = service.partsNeeded || [];
+// short is the thing worth knowing before the day arrives. `schedule`, when
+// given, resolves through partsNeededFor so this agrees with the buy list and
+// Mark done rather than showing whatever's frozen on the record itself; the
+// schedule page's own rows already pass their entry directly and need no
+// resolving.
+function partsNeededHtml(service, parts = [], schedule = null) {
+  const needed = schedule ? partsNeededFor(service, schedule) : service.partsNeeded || [];
   if (!needed.length) return "";
 
   const short = needed.filter((want) => {
@@ -2207,11 +2217,16 @@ async function openCompletedServiceForm(state, existing, odometerMiles, { comple
         name: "partsUsed",
         label: "Parts used (optional)",
         type: "parts",
-        // Marking a scheduled job done starts from the parts it said it needed;
-        // a whole visit starts from what all of its jobs did, added up.
+        // Marking a scheduled job done starts from what it currently needs --
+        // its schedule entry's list if one matches, not a stale copy frozen
+        // on the record since it was booked; a whole visit starts from what
+        // all of its jobs need, added up the same way.
         value: combining
           ? [...(existing?.parts || []), ...combining.flatMap((record) => record.parts || [])]
-          : existing?.parts || (completing ? existing?.partsNeeded : null) || (folding ? partsNeededAcross(folding) : null) || [],
+          : existing?.parts ||
+            (completing && existing ? partsNeededFor(existing, state.schedule) : null) ||
+            (folding ? partsNeededAcross(folding, state.schedule) : null) ||
+            [],
         catalogue: state.parts || [],
         vehicleId: state.id,
         // What the shelf says these cost can be dropped onto one of the jobs
@@ -2384,11 +2399,14 @@ function sharedShop(records) {
 }
 
 // What the whole visit needs off the shelf: every job's parts, added up, so two
-// oil changes on one trip ask for both lots of oil rather than one.
-function partsNeededAcross(records) {
+// oil changes on one trip ask for both lots of oil rather than one. Each
+// job's own list is resolved through partsNeededFor first, so a schedule
+// entry edited after its job was booked still wins over the stale copy on
+// the record.
+function partsNeededAcross(records, schedule) {
   const merged = new Map();
   for (const record of records) {
-    for (const need of record.partsNeeded || []) {
+    for (const need of partsNeededFor(record, schedule)) {
       if (!need.partId) continue;
       const current = merged.get(need.partId) || { ...need, quantity: 0 };
       current.quantity += Number(need.quantity) || 0;

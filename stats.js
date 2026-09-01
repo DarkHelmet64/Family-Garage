@@ -383,6 +383,19 @@ export function lastDoneFor(title, services) {
   })[matches.length - 1];
 }
 
+// What a job actually needs off the shelf: its schedule entry's current
+// parts list if one matches by name, since the schedule entry is the one
+// place that's meant to be edited -- a booked or done record's own copy is
+// only ever a snapshot made the moment it was added to the list, and goes
+// stale the moment the schedule entry changes after that. A job with no
+// matching schedule entry (an ad-hoc one-off) has nowhere else to defer to,
+// so it goes by what it noted for itself.
+export function partsNeededFor(service, schedule) {
+  const wanted = normalizeJob(service.title);
+  const scheduled = (schedule || []).find((entry) => normalizeJob(entry.title) === wanted);
+  return (scheduled ? scheduled.partsNeeded : service.partsNeeded) || [];
+}
+
 // What stands in for a job that has never been logged: the vehicle as it left
 // the factory -- zero miles, on January 1st of its model year. Every interval
 // then has something to count from, so a job never logged on a 2016 car reads
@@ -548,7 +561,7 @@ export function upcomingWork(vehicles, { today = new Date() } = {}) {
         title: service.title,
         dueOn: service.dueOn || null,
         dueOdometerMiles: service.dueOdometerMiles ?? null,
-        partsNeeded: service.partsNeeded || [],
+        partsNeeded: partsNeededFor(service, vehicle.schedule),
       });
     }
 
