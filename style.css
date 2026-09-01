@@ -1266,15 +1266,24 @@ input[type="file"] {
 
 .shopping-row {
   display: flex;
+  flex-wrap: wrap;
   justify-content: space-between;
   align-items: baseline;
-  gap: 12px;
+  gap: 2px 12px;
   padding: 6px 0;
   border-bottom: 1px solid var(--border);
   font-size: 0.9rem;
 }
 
 .shopping-row:last-child { border-bottom: none; }
+
+/* Which one to buy and where, on its own line under the name and the
+   shortfall rather than squeezed into a column beside them. */
+.shopping-detail {
+  flex-basis: 100%;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
 
 .shopping-need {
   color: var(--amber);
