@@ -370,13 +370,19 @@ function renderComingUp(state) {
     byVehicle.get(row.vehicleId)[row.status.key].push(row);
   }
 
+  // Wrapped one div per vehicle -- not needed for phone width, where they just
+  // stack as they always did, but it gives a tablet layout something to grid:
+  // each vehicle's block placed as one unit rather than its heading and status
+  // counts drifting into separate columns.
   const sections = [...byVehicle.values()]
     .sort(byVehicleName)
     .map(
       (vehicle) => `
-      <div class="section-title">${escapeHtml(vehicle.name)}</div>
-      ${statusGroupHtml(vehicle, "overdue", "Overdue", state.expanded)}
-      ${statusGroupHtml(vehicle, "soon", "Due soon", state.expanded)}`
+      <div class="plan-vehicle">
+        <div class="section-title">${escapeHtml(vehicle.name)}</div>
+        ${statusGroupHtml(vehicle, "overdue", "Overdue", state.expanded)}
+        ${statusGroupHtml(vehicle, "soon", "Due soon", state.expanded)}
+      </div>`
     )
     .join("");
 
@@ -411,7 +417,7 @@ function renderComingUp(state) {
           : ""
     }
 
-    ${sections}
+    <div class="plan-vehicles">${sections}</div>
   `;
 }
 

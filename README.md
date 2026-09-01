@@ -9,6 +9,16 @@ Pages, data stored for free in Firebase Firestore. It updates live on every
 device, so a fill-up logged at the pump is on the kitchen iPad before you're
 home.
 
+Built phone-first, and past **768px wide it opens up for a tablet**: the
+reading column widens, and the three screens that are really a flat set of
+interchangeable cards — the garage's own vehicles, its look-ahead grouped by
+vehicle, and the parts shelf — grid two across instead of stretching one card
+to fill the space. Everything else (a vehicle's own page, forms, the schedule,
+the gas log) stays the single column it always was, just with more room around
+it — those already read top to bottom rather than as a set of peers, and
+forcing them into a grid would fight that. A form still opens as the same
+centered dialog it always has; it was never meant to fill the width.
+
 ## How it works
 
 - **Garage** (the site's root URL): every vehicle with its average MPG, its
