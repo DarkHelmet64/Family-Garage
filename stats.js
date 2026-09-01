@@ -568,7 +568,9 @@ export function upcomingWork(vehicles, { today = new Date() } = {}) {
         title: entry.title,
         dueOn: entry.dueOn || null,
         dueOdometerMiles: entry.dueOdometerMiles ?? null,
-        partsNeeded: [],
+        // A schedule entry can name what it needs now, same as a booked job --
+        // so the buy list already knows before anyone's tapped Add to list.
+        partsNeeded: entry.partsNeeded || [],
         neverDone: entry.neverDone,
         countedFrom: entry.countedFrom || null,
       });

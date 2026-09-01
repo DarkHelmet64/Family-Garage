@@ -638,10 +638,11 @@ if the part has since left the shelf entirely.
 three states: what's short, "everything these jobs need is on the shelf" once
 none of it is, or — if not one of the pressing jobs has a parts list at all — a
 line saying so, rather than the card just not appearing. That third state is
-worth knowing on its own: a job the schedule merely implies is due carries no
-parts list of its own until it's actually booked in. [Set one on the schedule
-entry](#the-service-schedule) and every future **Add to list** for that job
-brings it along automatically.
+worth knowing on its own: a job carries no parts list until something has said
+what it needs — [a schedule entry](#the-service-schedule), or a job booked in
+by hand. **To buy** reads that straight off the schedule entry the moment a
+job is due, even before anyone's tapped **Add to list** — you don't need to
+book a job just to find out it needs a part you're out of.
 
 Working this out needs every vehicle's schedule, services and fill-ups, which
 the vehicle list itself doesn't — so it's read after the list has been asked
