@@ -397,6 +397,11 @@ function renderComingUp(state) {
                  (need) => `<div class="shopping-row">
                    <span>${escapeHtml(need.name)}</span>
                    <span class="shopping-need">${need.short} ${escapeHtml(need.unit)} short<span class="muted"> · need ${need.quantity}, have ${need.have}</span></span>
+                   ${
+                     shoppingDetail(need)
+                       ? `<span class="shopping-detail">${escapeHtml(shoppingDetail(need))}</span>`
+                       : ""
+                   }
                  </div>`
                )
                .join("")}
@@ -412,6 +417,14 @@ function renderComingUp(state) {
 
 // A count you can open. Closed it answers "how bad is it" in one line; opened
 // it lists the jobs behind the number.
+// Which one to buy, and where -- the things you'd otherwise have to open the
+// shelf to look up while standing in the aisle.
+function shoppingDetail(need) {
+  return [need.modelNumber ? `model ${need.modelNumber}` : null, need.size || null, need.vendor ? `from ${need.vendor}` : null]
+    .filter(Boolean)
+    .join(" · ");
+}
+
 function statusGroupHtml(vehicle, key, label, expanded) {
   const rows = vehicle[key];
   if (!rows.length) return "";

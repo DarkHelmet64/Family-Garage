@@ -581,7 +581,15 @@ drive can be dated that way, so a job you're already past is simply overdue.
 
 At the top is **To buy** — everything this work needs, added up across jobs and
 set against the shelf, so a Saturday oil change doesn't stall on a filter nobody
-bought.
+bought. Each line says which one to buy and where:
+
+> **0W-20 oil** — **2 qt short** · need 5, have 3
+> *model M1-0W20 · 0W-20 · from NAPA*
+
+Those come off the shelf entry as it stands today, not off the job that asked
+for them — in the aisle you want what the shelf says now, and a job booked
+before any of that was recorded has none of it. What the job noted is used only
+if the part has since left the shelf entirely.
 
 Working this out needs every vehicle's schedule, services and fill-ups, which
 the vehicle list itself doesn't — so it's read after the list has been asked

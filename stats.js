@@ -581,8 +581,21 @@ export function partsForecast(rows, parts) {
   const wanted = new Map();
   for (const row of rows) {
     for (const need of row.partsNeeded || []) {
-      const current = wanted.get(need.partId) || { partId: need.partId, name: need.name, unit: need.unit, quantity: 0 };
+      const current = wanted.get(need.partId) || {
+        partId: need.partId,
+        name: need.name,
+        unit: need.unit,
+        quantity: 0,
+        modelNumber: null,
+        size: null,
+        vendor: null,
+      };
       current.quantity += Number(need.quantity) || 0;
+      // Whatever any of the jobs happened to note, in case the part has since
+      // left the shelf and there's nothing else to go on.
+      current.modelNumber = current.modelNumber || need.modelNumber || null;
+      current.size = current.size || need.size || null;
+      current.vendor = current.vendor || need.vendor || null;
       wanted.set(need.partId, current);
     }
   }
@@ -591,7 +604,19 @@ export function partsForecast(rows, parts) {
     .map((need) => {
       const part = parts.find((candidate) => candidate.id === need.partId);
       const have = part ? Number(part.quantity) || 0 : 0;
-      return { ...need, have, short: Math.max(0, need.quantity - have), unit: need.unit || (part && part.unit) || "each" };
+      return {
+        ...need,
+        have,
+        short: Math.max(0, need.quantity - have),
+        unit: need.unit || (part && part.unit) || "each",
+        // Which one to buy, taken from the shelf rather than from what the job
+        // recorded: standing in the aisle you want what the shelf says today,
+        // and a job booked before any of this was kept has none of it. What the
+        // job noted stands in only if the part has since left the shelf.
+        modelNumber: (part && part.modelNumber) || need.modelNumber || null,
+        size: (part && part.size) || need.size || null,
+        vendor: (part && part.vendor) || need.vendor || null,
+      };
     })
     .sort((a, b) => b.short - a.short || String(a.name).localeCompare(String(b.name)));
 }
