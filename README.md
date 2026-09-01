@@ -439,6 +439,14 @@ what you're doing on Saturday, not the interval, so every job can be added; only
 the pressing ones get the green button. A row already on the list says so
 instead of offering to add a second copy.
 
+It asks one thing before adding it: **what it'll need off the shelf**, since a
+schedule entry is just a title and an interval and carries no parts list of its
+own. Leave it blank and tap through — the common case, one tap either way — or
+note a part and it travels with the job: onto its **Needs** line, into **To
+buy** if the shelf's short, and into **Mark done**'s own parts list when you
+get to it, pre-filled rather than typed again. Nothing leaves the shelf at this
+step; that still only happens once the job is actually marked done.
+
 Once there's more than one job waiting, the Service section on the vehicle page
 offers **Log as one visit** on its Service heading — see [One visit, several
 jobs](#one-visit-several-jobs).
@@ -628,9 +636,9 @@ three states: what's short, "everything these jobs need is on the shelf" once
 none of it is, or — if not one of the pressing jobs has a parts list at all — a
 line saying so, rather than the card just not appearing. That third state is
 worth knowing on its own: a job the schedule merely implies is due carries no
-parts list of its own, only what's attached when you book it in by hand. If
-every pressing job in the garage is schedule-implied rather than booked, **To
-buy** stays in that third state until one of them is.
+parts list of its own until it's actually booked in, whether by hand or with
+[**Add to list**](#the-service-schedule), which is exactly where to give it
+one.
 
 Working this out needs every vehicle's schedule, services and fill-ups, which
 the vehicle list itself doesn't — so it's read after the list has been asked

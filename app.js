@@ -2330,7 +2330,7 @@ function renderScheduleView(id) {
   `;
 
   const bodyEl = document.getElementById("schedule-body");
-  const state = { id, vehicle: null, services: null, fillups: [], schedule: null };
+  const state = { id, vehicle: null, services: null, fillups: [], schedule: null, parts: [] };
 
   bodyEl.addEventListener("click", (event) => {
     const target = event.target.closest("[data-act]");
@@ -2363,6 +2363,15 @@ function renderScheduleView(id) {
     state.schedule = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
     render();
   });
+  onSnapshot(
+    collection(db, "parts"),
+    (snap) => {
+      state.parts = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      state.parts.sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")));
+    },
+    // The picker is just a little shorter if this fails; nothing here depends on it.
+    (err) => console.warn("Couldn't read the parts list", err)
+  );
 }
 
 function scheduleBodyHtml(state) {
@@ -2537,13 +2546,12 @@ async function openPlanForm(state, existing) {
 
 // Turns a due entry into a real scheduled job, so it appears in the vehicle's
 // service list and on the garage badge alongside anything booked in by hand.
-// Written once and called from both places that offer it -- the vehicle's own
-// schedule page and the garage screen's look-ahead -- so the same tap on either
-// leaves the same record behind.
 //
-// Hands back what it wrote, so a caller holding its own copy of the garage can
-// move the row across without reading it all again.
-async function bookScheduleEntry(vehicleId, entry, services) {
+// A schedule entry carries no parts list of its own -- only a title and an
+// interval -- so `partsNeeded` comes from the caller, not from `entry`.
+// Hands back what it wrote, so a caller holding its own copy of the garage
+// could move the row across without reading it all again.
+async function bookScheduleEntry(vehicleId, entry, services, { partsNeeded = [] } = {}) {
   if (onListTitles(services).has(normalizeJob(entry.title))) {
     await openAlertModal(`${entry.title} is already on the service list.`);
     return null;
@@ -2561,6 +2569,7 @@ async function bookScheduleEntry(vehicleId, entry, services) {
     costCents: null,
     repeatMiles: entry.everyMiles ?? null,
     repeatMonths: entry.everyMonths ?? null,
+    partsNeeded,
   };
 
   const added = await addDoc(collection(db, "vehicles", vehicleId, "services"), {
@@ -2572,6 +2581,10 @@ async function bookScheduleEntry(vehicleId, entry, services) {
   return { id: added.id, ...payload };
 }
 
+// "Add to list" opens straight to this rather than a full schedule-service
+// sheet -- the date and mileage the entry is due by are already decided by
+// the schedule, so the only thing left to ask is what it'll need off the
+// shelf, and only if there's something to ask.
 async function bookPlanEntry(state, id) {
   const odometerMiles = currentOdometer(state.vehicle, state.fillups, state.services);
   const row = scheduleRows(state.schedule, state.services, {
@@ -2580,7 +2593,25 @@ async function bookPlanEntry(state, id) {
     vehicleYear: state.vehicle.year,
   }).find((entry) => entry.id === id);
   if (!row) return;
-  await bookScheduleEntry(state.id, row, state.services);
+
+  const values = await openFormModal({
+    title: `Add "${row.title}" to the list`,
+    fields: [
+      {
+        name: "partsNeeded",
+        label: "Parts needed (optional)",
+        type: "parts",
+        value: [],
+        catalogue: state.parts || [],
+        vehicleId: state.id,
+        hint: "Nothing leaves the shelf until the job is marked done — this is so you know what to have in.",
+      },
+    ],
+    submitLabel: "Add to list",
+  });
+  if (!values) return;
+
+  await bookScheduleEntry(state.id, row, state.services, { partsNeeded: values.partsNeeded || [] });
 }
 
 // Moves the shelf by the difference between what a record used to book and what
