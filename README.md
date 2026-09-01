@@ -261,10 +261,14 @@ it carries forward from there.
 
 ## Service
 
-**+ Add** on the Service heading puts a job on the list: a name ("Oil change",
-"Replace serpentine belt"), and a due date, a due mileage, or both — whichever
-comes first is what the reminder goes by. Optionally a shop, the parts it'll
-need, and a note.
+**+ Add** on the Service heading puts one or more jobs on the list at once —
+**+ Add another job** for a second, third, and so on — each just a name ("Oil
+change", "Replace serpentine belt"). They share a due date, a due mileage, or
+both (whichever comes first is what the reminder goes by), and optionally a
+shop and a note. Several jobs due at the same visit save as separate records,
+one per name, so each shows and gets marked done on its own. Parts entered
+here land on the first job listed — add parts to any of the others afterward
+by editing it on its own.
 
 Nothing about it has to come from the [service
 schedule](#the-service-schedule). The schedule is for jobs that come round on

@@ -1998,19 +1998,40 @@ function openAddServiceMenu(state, odometerMiles) {
   });
 }
 
+// Editing one already-scheduled job keeps its own name field -- there's only
+// ever one title to change. Adding new ones offers a line per job instead, so
+// a whole visit's worth (inspection, wipers, cabin filter, all due at once)
+// can be booked in one pass, sharing the date, mileage, shop, parts and notes
+// below. Parts entered here land on the first job listed, not every one of
+// them -- the buy list adds a job's partsNeeded across every pressing row, so
+// putting the same list on several new jobs would count each part several
+// times over. Add parts to any other job afterward by editing it on its own.
 async function openScheduleServiceForm(state, existing, odometerMiles) {
   const values = await openFormModal({
     title: existing ? "Edit scheduled service" : "Schedule service",
-    hint: "Set a date, a mileage, or both — whichever comes first is what the reminder goes by.",
+    hint: existing
+      ? "Set a date, a mileage, or both — whichever comes first is what the reminder goes by."
+      : "Set a date, a mileage, or both — whichever comes first is what the reminder goes by. Add a line for each job due at the same time.",
     fields: [
-      {
-        name: "title",
-        label: "Service",
-        type: "text",
-        value: existing?.title || "",
-        placeholder: "Oil change",
-        suggestions: serviceSuggestions(state),
-      },
+      existing
+        ? {
+            name: "title",
+            label: "Service",
+            type: "text",
+            value: existing.title || "",
+            placeholder: "Oil change",
+            suggestions: serviceSuggestions(state),
+          }
+        : {
+            name: "titles",
+            label: "Services",
+            type: "list",
+            titlesOnly: true,
+            itemPlaceholder: "Oil change",
+            addLabel: "+ Add another job",
+            value: [],
+            suggestions: serviceSuggestions(state),
+          },
       { name: "dueOn", label: "Due date", type: "date", half: true, value: existing?.dueOn || "" },
       {
         name: "dueOdometer",
@@ -2037,14 +2058,17 @@ async function openScheduleServiceForm(state, existing, odometerMiles) {
         value: existing?.partsNeeded || [],
         catalogue: state.parts || [],
         vehicleId: state.id,
-        hint: "Nothing leaves the shelf until the job is marked done — this is so you know what to have in.",
+        hint: existing
+          ? "Nothing leaves the shelf until the job is marked done — this is so you know what to have in."
+          : "Nothing leaves the shelf until the job is marked done. Adding more than one job above? This applies to the first one listed.",
       },
       { name: "notes", label: "Notes (optional)", type: "textarea", value: existing?.notes || "" },
     ],
     submitLabel: existing ? "Save changes" : "Schedule it",
     destructive: existing ? { label: "Delete this service" } : null,
     validate: (v) => {
-      if (!v.title) return "What service is it?";
+      const titled = existing ? !!v.title : (v.titles || []).some((item) => item.title);
+      if (!titled) return "What service is it?";
       if (!v.dueOn && !v.dueOdometer) return "Add a due date, a due mileage, or both.";
       if (v.dueOdometer && !Number.isFinite(Number(v.dueOdometer))) return "That mileage doesn't look right.";
       return null;
@@ -2056,31 +2080,41 @@ async function openScheduleServiceForm(state, existing, odometerMiles) {
     return;
   }
 
-  const payload = {
-    title: values.title,
+  const shared = {
     status: "scheduled",
     dueOn: values.dueOn || null,
     dueOdometerMiles: values.dueOdometer ? Math.round(Number(values.dueOdometer)) : null,
     shop: values.shop || null,
     notes: values.notes || null,
-    partsNeeded: values.partsNeeded || [],
   };
 
   if (existing) {
-    await updateDoc(doc(db, "vehicles", state.id, "services", existing.id), payload);
-  } else {
-    await addDoc(collection(db, "vehicles", state.id, "services"), {
-      ...payload,
-      servicedOn: null,
-      odometerMiles: null,
-      costCents: null,
-      parts: null,
-      repeatMiles: null,
-      repeatMonths: null,
-      createdAt: serverTimestamp(),
+    await updateDoc(doc(db, "vehicles", state.id, "services", existing.id), {
+      ...shared,
+      title: values.title,
+      partsNeeded: values.partsNeeded || [],
     });
+    showToast("Service updated");
+  } else {
+    const titles = (values.titles || []).map((item) => item.title).filter(Boolean);
+    await Promise.all(
+      titles.map((title, index) =>
+        addDoc(collection(db, "vehicles", state.id, "services"), {
+          ...shared,
+          title,
+          partsNeeded: index === 0 ? values.partsNeeded || [] : [],
+          servicedOn: null,
+          odometerMiles: null,
+          costCents: null,
+          parts: null,
+          repeatMiles: null,
+          repeatMonths: null,
+          createdAt: serverTimestamp(),
+        })
+      )
+    );
+    showToast(titles.length > 1 ? `${titles.length} services scheduled` : "Service scheduled");
   }
-  showToast(existing ? "Service updated" : "Service scheduled");
   await recomputeSummary(state.id);
 }
 
