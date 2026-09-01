@@ -539,16 +539,25 @@ export function upcomingWork(vehicles, { today = new Date() } = {}) {
 
     const rows = [];
 
+    // What a job needs is set on its schedule entry, not frozen onto the
+    // booked record the moment "Add to list" copies it over -- so editing the
+    // schedule entry's parts keeps reaching the buy list even after the job's
+    // already booked, instead of only until the copy goes stale. A booked job
+    // with no matching schedule entry (an ad-hoc one-off) has nowhere else to
+    // defer to, so it still falls back to what it noted for itself.
+    const scheduleByJob = new Map((vehicle.schedule || []).map((entry) => [normalizeJob(entry.title), entry]));
+
     // Booked jobs first; they're a commitment rather than a rule.
     for (const service of services) {
       if (service.status === "done") continue;
+      const scheduled = scheduleByJob.get(normalizeJob(service.title));
       rows.push({
         source: "booked",
         id: service.id,
         title: service.title,
         dueOn: service.dueOn || null,
         dueOdometerMiles: service.dueOdometerMiles ?? null,
-        partsNeeded: service.partsNeeded || [],
+        partsNeeded: (scheduled ? scheduled.partsNeeded : service.partsNeeded) || [],
       });
     }
 

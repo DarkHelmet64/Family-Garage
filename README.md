@@ -643,9 +643,16 @@ none of it is, or — if not one of the pressing jobs has a parts list at all �
 line saying so, rather than the card just not appearing. That third state is
 worth knowing on its own: a job carries no parts list until something has said
 what it needs — [a schedule entry](#the-service-schedule), or a job booked in
-by hand. **To buy** reads that straight off the schedule entry the moment a
-job is due, even before anyone's tapped **Add to list** — you don't need to
-book a job just to find out it needs a part you're out of.
+by hand.
+
+**To buy** reads that straight off the schedule entry, not off whatever's
+booked — before anyone's tapped **Add to list**, and after. Booking a job
+copies its schedule entry's parts list over so the record itself is never
+empty, but the schedule entry keeps being the one that counts: edit it later
+— say, once you find out the filter's a different size — and the buy list
+follows, even for a job that's already on the list, with nothing to re-book.
+A job with no matching schedule entry — the one-off, added by hand — has
+nowhere else to defer to, so it still goes by whatever it noted for itself.
 
 Working this out needs every vehicle's schedule, services and fill-ups, which
 the vehicle list itself doesn't — so it's read after the list has been asked
