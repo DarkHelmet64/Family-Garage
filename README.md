@@ -21,11 +21,10 @@ centered dialog it always has; it was never meant to fill the width.
 
 ## How it works
 
-- **Garage** (the site's root URL): every vehicle with its average MPG, its
-  odometer, and a badge when something is **due soon**. Overdue work isn't
-  repeated here — it's already the headline of **Coming up** just below: what's
-  overdue and due soon across the whole garage, counted by vehicle. See
-  [What's coming up](#whats-coming-up).
+- **Garage** (the site's root URL): every vehicle with its average MPG and its
+  odometer. Its service status isn't repeated on the card — **Coming up** just
+  below already covers what's overdue and due soon across the whole garage,
+  counted by vehicle. See [What's coming up](#whats-coming-up).
 - Every action sits at the top of what it acts on rather than under it: a
   page's own action beside its heading (**More** on the garage, **+ Add a
   service** on the schedule, **+ Add a part** on the shelf), and a section's on
@@ -239,8 +238,7 @@ plenty of them carry a "next due" column as well, so both come across in one go:
 - A row with a **date done or an odometer reading** becomes **history**, with
   its cost, shop, and notes.
 - A row with **only a next-due date or mileage** becomes a **scheduled job**,
-  and turns up in the Service list (and on the garage badge) like one you'd
-  entered by hand.
+  and turns up in the Service list like one you'd entered by hand.
 - A row with a name but no date, mileage, or due date can't be placed, so it's
   left out and listed.
 
@@ -272,8 +270,8 @@ Nothing about it has to come from the [service
 schedule](#the-service-schedule). The schedule is for jobs that come round on
 an interval; this is for the one-off — the belt that started squealing, the
 recall letter, the thing you noticed on the drive home. Either way it lands on
-the same list, shows on the garage badge, and appears in [What's coming
-up](#whats-coming-up) as **booked**.
+the same list and appears in [What's coming up](#whats-coming-up) as
+**booked**.
 
 Tap **🔧 Add service** at the top of the page instead for either:
 
@@ -318,7 +316,7 @@ adds nothing — and shows the total on the right:
 > · Oil change $79.95 · Air filter $42.40 · Brake pads $290.00
 
 A visit is named after its first job. That name is what a follow-up scheduled by
-a repeat interval carries, what the garage badge shows, and what the description
+a repeat interval carries, what shows in **Coming up**, and what the description
 dropdown offers, so it stays a real service name rather than a summary.
 
 Records entered before this, and ones brought in by the spreadsheet importer
@@ -370,9 +368,8 @@ source record gets combined in.
 Open services are sorted with the most pressing first and color-coded: red for
 **overdue** (the date has passed, or you've driven past the mileage), amber for
 **due soon** (within 30 days or 500 miles), plain for everything further out.
-The garage list shows the same badge on the vehicle for due-soon work; overdue
-work skips the card — **Coming up** already covers it, so you're not told
-about the same job twice.
+The garage card doesn't repeat any of that — **Coming up** already covers
+overdue and due-soon work, so you're not told about the same job twice.
 
 When you log a completed service you can also set **do it again in ___ miles**
 or **___ months**. That schedules the next one right then — log an oil change at
@@ -382,8 +379,8 @@ it fills in today's date and your current odometer, and rolls the next one
 forward if the service repeats.
 
 Nothing here sends notifications — there's no server to send them. The app knows
-what's due whenever you open it, which is what the badge on the garage list is
-for.
+what's due whenever you open it, which is what **Coming up** and the badges on
+each vehicle's own service list are for.
 
 ### The service schedule
 
@@ -443,8 +440,8 @@ date and their own next-due.
 
 **Add to list** on any row — overdue, months off, or never logged — puts it on
 the vehicle's service list as a booked job, so it turns up in the Service
-section and on the garage badge alongside anything you scheduled by hand. That
-step is deliberate: the schedule is a rule about how often something comes
+section, and in **Coming up** once it's overdue or due soon, alongside
+anything you scheduled by hand. That step is deliberate: the schedule is a rule about how often something comes
 round, and the service list is what you've actually committed to. You decide
 what you're doing on Saturday, not the interval, so every job can be added; only
 the pressing ones get the green button. A row already on the list says so
@@ -655,8 +652,8 @@ opens rather than watched live; coming back to the garage reads it again.
 
 The same job ends up typed a few different ways over the years — "Oil chg",
 "oil change", "Oil Change" — and everything that matches on a job's name (the
-schedule deciding what's already booked, the suggestion list, the badge on the
-garage card) treats each spelling as a different job.
+schedule deciding what's already booked, the suggestion list, what shows in
+**Coming up**) treats each spelling as a different job.
 
 **More > 🏷️ Service names** is a register of every name in use across the whole
 garage, with how many vehicles and how many records carry each — grouped the

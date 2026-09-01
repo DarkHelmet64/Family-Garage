@@ -202,24 +202,19 @@ function vehicleCardHtml(vehicle) {
     ? serviceStatus({ ...next, status: "scheduled" }, { odometerMiles: vehicle.odometerMiles ?? null })
     : null;
 
-  // Overdue items already get full treatment in the "Coming up" section below;
-  // repeating it here is redundant, so the vehicle card only flags "soon".
-  const overdue = status?.key === "overdue";
-
-  const badge =
-    status && status.key === "soon"
-      ? `<span class="badge ${status.key}">${escapeHtml(status.label)}</span>`
-      : "";
+  // Overdue and due-soon work already get full treatment in the "Coming up"
+  // section below; repeating it here would just be noise.
+  const pressing = status?.key === "overdue" || status?.key === "soon";
 
   const serviceLine =
-    next && !overdue
+    next && !pressing
       ? `<span class="vehicle-service ${status.key}">${escapeHtml(next.title)} · ${escapeHtml(dueSummary(next, vehicle.odometerMiles ?? null))}</span>`
       : "";
 
   return `
     <div class="card vehicle-row" data-id="${vehicle.id}">
       <div class="vehicle-main">
-        <span class="vehicle-name">${escapeHtml(vehicle.name)}${badge}</span>
+        <span class="vehicle-name">${escapeHtml(vehicle.name)}</span>
         ${subtitle ? `<span class="vehicle-sub">${escapeHtml(subtitle)}</span>` : ""}
         ${serviceLine}
       </div>
