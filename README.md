@@ -21,10 +21,10 @@ centered dialog it always has; it was never meant to fill the width.
 
 ## How it works
 
-- **Garage** (the site's root URL): every vehicle with its average MPG, its
-  odometer, and a badge when something is **due soon** or **overdue** — and
-  below that, **Coming up**: what's overdue and due soon across the whole
-  garage, counted by vehicle. See [What's coming up](#whats-coming-up).
+- **Garage** (the site's root URL): every vehicle with its average MPG and its
+  odometer. Its service status isn't repeated on the card — **Coming up** just
+  below already covers what's overdue and due soon across the whole garage,
+  counted by vehicle. See [What's coming up](#whats-coming-up).
 - Every action sits at the top of what it acts on rather than under it: a
   page's own action beside its heading (**More** on the garage, **+ Add a
   service** on the schedule, **+ Add a part** on the shelf), and a section's on
@@ -238,8 +238,7 @@ plenty of them carry a "next due" column as well, so both come across in one go:
 - A row with a **date done or an odometer reading** becomes **history**, with
   its cost, shop, and notes.
 - A row with **only a next-due date or mileage** becomes a **scheduled job**,
-  and turns up in the Service list (and on the garage badge) like one you'd
-  entered by hand.
+  and turns up in the Service list like one you'd entered by hand.
 - A row with a name but no date, mileage, or due date can't be placed, so it's
   left out and listed.
 
@@ -262,17 +261,21 @@ it carries forward from there.
 
 ## Service
 
-**+ Add** on the Service heading puts a job on the list: a name ("Oil change",
-"Replace serpentine belt"), and a due date, a due mileage, or both — whichever
-comes first is what the reminder goes by. Optionally a shop, the parts it'll
-need, and a note.
+**+ Add** on the Service heading puts one or more jobs on the list at once —
+**+ Add another job** for a second, third, and so on — each just a name ("Oil
+change", "Replace serpentine belt"). They share a due date, a due mileage, or
+both (whichever comes first is what the reminder goes by), and optionally a
+shop and a note. Several jobs due at the same visit save as separate records,
+one per name, so each shows and gets marked done on its own. Parts entered
+here land on the first job listed — add parts to any of the others afterward
+by editing it on its own.
 
 Nothing about it has to come from the [service
 schedule](#the-service-schedule). The schedule is for jobs that come round on
 an interval; this is for the one-off — the belt that started squealing, the
 recall letter, the thing you noticed on the drive home. Either way it lands on
-the same list, shows on the garage badge, and appears in [What's coming
-up](#whats-coming-up) as **booked**.
+the same list and appears in [What's coming up](#whats-coming-up) as
+**booked**.
 
 Tap **🔧 Add service** at the top of the page instead for either:
 
@@ -317,7 +320,7 @@ adds nothing — and shows the total on the right:
 > · Oil change $79.95 · Air filter $42.40 · Brake pads $290.00
 
 A visit is named after its first job. That name is what a follow-up scheduled by
-a repeat interval carries, what the garage badge shows, and what the description
+a repeat interval carries, what shows in **Coming up**, and what the description
 dropdown offers, so it stays a real service name rather than a summary.
 
 Records entered before this, and ones brought in by the spreadsheet importer
@@ -369,8 +372,8 @@ source record gets combined in.
 Open services are sorted with the most pressing first and color-coded: red for
 **overdue** (the date has passed, or you've driven past the mileage), amber for
 **due soon** (within 30 days or 500 miles), plain for everything further out.
-The garage list shows the same badge on the vehicle, so you can see the truck
-needs something without opening it.
+The garage card doesn't repeat any of that — **Coming up** already covers
+overdue and due-soon work, so you're not told about the same job twice.
 
 When you log a completed service you can also set **do it again in ___ miles**
 or **___ months**. That schedules the next one right then — log an oil change at
@@ -380,8 +383,8 @@ it fills in today's date and your current odometer, and rolls the next one
 forward if the service repeats.
 
 Nothing here sends notifications — there's no server to send them. The app knows
-what's due whenever you open it, which is what the badge on the garage list is
-for.
+what's due whenever you open it, which is what **Coming up** and the badges on
+each vehicle's own service list are for.
 
 ### The service schedule
 
@@ -403,6 +406,15 @@ Overdue first, then due soon, then the rest. Nothing here is stored as a
 reminder: the next-due figures are worked out from your history every time the
 page opens, so **logging a service moves them on its own**. Shorten an interval
 and every date recalculates on the spot.
+
+An entry can also say **what it needs off the shelf** — the same "Parts
+needed" picker as everywhere else, set on the entry itself rather than typed in
+fresh each time it comes round. Set it once on "Oil change" and every future
+**Add to list** for that job carries it straight onto the booked record — no
+prompt, no extra tap, nothing to remember when you're standing at the shelf
+doing the work. Nothing leaves the shelf at that point; a part is only ever
+actually taken off the shelf once the job is marked done, whenever that ends up
+being.
 
 ### A job you've never logged
 
@@ -432,20 +444,14 @@ date and their own next-due.
 
 **Add to list** on any row — overdue, months off, or never logged — puts it on
 the vehicle's service list as a booked job, so it turns up in the Service
-section and on the garage badge alongside anything you scheduled by hand. That
-step is deliberate: the schedule is a rule about how often something comes
+section, and in **Coming up** once it's overdue or due soon, alongside
+anything you scheduled by hand. That step is deliberate: the schedule is a rule about how often something comes
 round, and the service list is what you've actually committed to. You decide
 what you're doing on Saturday, not the interval, so every job can be added; only
 the pressing ones get the green button. A row already on the list says so
-instead of offering to add a second copy.
-
-It asks one thing before adding it: **what it'll need off the shelf**, since a
-schedule entry is just a title and an interval and carries no parts list of its
-own. Leave it blank and tap through — the common case, one tap either way — or
-note a part and it travels with the job: onto its **Needs** line, into **To
-buy** if the shelf's short, and into **Mark done**'s own parts list when you
-get to it, pre-filled rather than typed again. Nothing leaves the shelf at this
-step; that still only happens once the job is actually marked done.
+instead of offering to add a second copy. It's one tap, no questions asked —
+whatever the row already needs off the shelf comes with it; see [the service
+schedule](#the-service-schedule) for where that's set.
 
 Once there's more than one job waiting, the Service section on the vehicle page
 offers **Log as one visit** on its Service heading — see [One visit, several
@@ -635,10 +641,11 @@ if the part has since left the shelf entirely.
 three states: what's short, "everything these jobs need is on the shelf" once
 none of it is, or — if not one of the pressing jobs has a parts list at all — a
 line saying so, rather than the card just not appearing. That third state is
-worth knowing on its own: a job the schedule merely implies is due carries no
-parts list of its own until it's actually booked in, whether by hand or with
-[**Add to list**](#the-service-schedule), which is exactly where to give it
-one.
+worth knowing on its own: a job carries no parts list until something has said
+what it needs — [a schedule entry](#the-service-schedule), or a job booked in
+by hand. **To buy** reads that straight off the schedule entry the moment a
+job is due, even before anyone's tapped **Add to list** — you don't need to
+book a job just to find out it needs a part you're out of.
 
 Working this out needs every vehicle's schedule, services and fill-ups, which
 the vehicle list itself doesn't — so it's read after the list has been asked
@@ -649,25 +656,33 @@ opens rather than watched live; coming back to the garage reads it again.
 
 The same job ends up typed a few different ways over the years — "Oil chg",
 "oil change", "Oil Change" — and everything that matches on a job's name (the
-schedule deciding what's already booked, the suggestion list, the badge on the
-garage card) treats each spelling as a different job.
+schedule deciding what's already booked, the suggestion list, what shows in
+**Coming up**) treats each spelling as a different job.
 
 **More > 🏷️ Service names** is a register of every name in use across the whole
 garage, with how many vehicles and how many records carry each — grouped the
 same case-and-spacing-insensitive way scheduling already decides two jobs are
 the same one, so "Oil chg" and "oil CHANGE" show up as one row, not two.
 
-Tap a name to rename it, and it changes **everywhere**: every schedule entry
-that names it, every booked job, every item on a past visit, and which job a
-booked part was for — on every vehicle, not just one. Typing back the name
-already showing still does something useful: it normalizes any stray-cased
-variant to that exact spelling.
+Tap a name and it expands into which vehicles carry it and when it was last
+actually done on each, with an **Open** link straight to that vehicle. A
+vehicle that only has a schedule entry or a booked job for it — nothing done
+yet — shows "not logged yet" instead of a date.
 
-Renaming to a name that's already in use merges the two — if "Oil Chg" and "Oil
-change" were really the same job typed two ways, renaming one to the other
-folds them into a single row here. It doesn't merge *records* on any one
-vehicle, though — two records with the same name on the same vehicle after a
-rename are exactly what they were before, just agreeing on what to call it.
+**Rename** changes it **everywhere**: every schedule entry that names it,
+every booked job, every item on a past visit, and which job a booked part was
+for — on every vehicle, not just one. Typing back the name already showing
+still does something useful: it normalizes any stray-cased variant to that
+exact spelling. Renaming to a name that's already in use merges the two — if
+"Oil Chg" and "Oil change" were really the same job typed two ways, renaming
+one to the other folds them into a single row here.
+
+**Merge** does the same thing for more than two at once: tick the names that
+are really the same job, tap **Merge**, and pick which spelling wins —
+everything else picked rewrites to that one, everywhere, in a single pass.
+Either way, it doesn't merge *records* on any one vehicle — two records with
+the same name on the same vehicle after a rename or a merge are exactly what
+they were before, just agreeing on what to call it.
 
 ## Security note
 

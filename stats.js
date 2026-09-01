@@ -481,6 +481,7 @@ export function serviceNameReport(vehicles) {
       key: entry.key,
       name: [...entry.casing.entries()].sort((a, b) => b[1] - a[1])[0][0],
       vehicles: entry.vehicleIds.size,
+      vehicleIds: [...entry.vehicleIds],
       records: entry.records,
     }))
     .sort((a, b) => a.name.localeCompare(b.name));
@@ -568,7 +569,9 @@ export function upcomingWork(vehicles, { today = new Date() } = {}) {
         title: entry.title,
         dueOn: entry.dueOn || null,
         dueOdometerMiles: entry.dueOdometerMiles ?? null,
-        partsNeeded: [],
+        // A schedule entry can name what it needs now, same as a booked job --
+        // so the buy list already knows before anyone's tapped Add to list.
+        partsNeeded: entry.partsNeeded || [],
         neverDone: entry.neverDone,
         countedFrom: entry.countedFrom || null,
       });

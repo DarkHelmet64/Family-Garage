@@ -49,6 +49,7 @@ import {
   undoDerivedTitle,
   scheduleRows,
   normalizeJob,
+  lastDoneFor,
   isLowStock,
   upcomingWork,
   partsForecast,
@@ -202,19 +203,19 @@ function vehicleCardHtml(vehicle) {
     ? serviceStatus({ ...next, status: "scheduled" }, { odometerMiles: vehicle.odometerMiles ?? null })
     : null;
 
-  const badge =
-    status && (status.key === "overdue" || status.key === "soon")
-      ? `<span class="badge ${status.key}">${escapeHtml(status.label)}</span>`
-      : "";
+  // Overdue and due-soon work already get full treatment in the "Coming up"
+  // section below; repeating it here would just be noise.
+  const pressing = status?.key === "overdue" || status?.key === "soon";
 
-  const serviceLine = next
-    ? `<span class="vehicle-service ${status.key}">${escapeHtml(next.title)} · ${escapeHtml(dueSummary(next, vehicle.odometerMiles ?? null))}</span>`
-    : "";
+  const serviceLine =
+    next && !pressing
+      ? `<span class="vehicle-service ${status.key}">${escapeHtml(next.title)} · ${escapeHtml(dueSummary(next, vehicle.odometerMiles ?? null))}</span>`
+      : "";
 
   return `
     <div class="card vehicle-row" data-id="${vehicle.id}">
       <div class="vehicle-main">
-        <span class="vehicle-name">${escapeHtml(vehicle.name)}${badge}</span>
+        <span class="vehicle-name">${escapeHtml(vehicle.name)}</span>
         ${subtitle ? `<span class="vehicle-sub">${escapeHtml(subtitle)}</span>` : ""}
         ${serviceLine}
       </div>
@@ -280,11 +281,13 @@ function openGarageMenu() {
 //
 // The same job ends up typed a few different ways over the years -- "Oil chg",
 // "oil change", "Oil Change" -- and everything that matches on a job's name --
-// the schedule deciding what's already booked, the suggestion list, the badge
-// on the garage card -- treats each spelling as a different job. This is a
-// register of every name in the garage, with a way to fix one everywhere at
-// once: the schedule entry, the booked job, and every past visit that used it,
-// on every vehicle.
+// the schedule deciding what's already booked, the suggestion list, what
+// shows in Coming up -- treats each spelling as a different job. This is a
+// register of every name in the garage: tap one to see which vehicles carry
+// it and when it was last actually done on each, or fix it everywhere at
+// once -- the schedule entry, the booked job, and every past visit that used
+// it, on every vehicle. Merge picks up where a single rename leaves off, for
+// when more than two spellings need folding into one in a single pass.
 //
 // Read once when the page opens, the same as the look-ahead and for the same
 // reason: answering it needs every vehicle's schedule and service records, not
@@ -295,17 +298,24 @@ function renderServiceNamesView() {
   $app.innerHTML = `
     <a class="back-link" href="./">&larr; Garage</a>
     <h1><span class="emoji">🏷️</span>Service names</h1>
-    <p class="hint">Every job name in use across the garage. Rename one and it updates
-    every schedule entry, booked job, and past visit that used it — on every vehicle.</p>
+    <p class="hint">Every job name in use across the garage. Tap one to see which vehicles
+    carry it and when it was last done. Rename or merge changes every schedule entry,
+    booked job, and past visit that used it — on every vehicle.</p>
     <div id="names-list"><p class="loading">Reading the whole garage…</p></div>
   `;
 
-  const state = { vehicles: [], report: [] };
+  const state = {
+    vehicles: [],
+    report: [],
+    expandedNames: new Set(),
+    mergeMode: false,
+    mergeSelected: new Set(),
+  };
 
   $app.addEventListener("click", (event) => {
-    const target = event.target.closest("[data-act=edit-name]");
+    const target = event.target.closest("[data-act]");
     if (!target) return;
-    Promise.resolve(handleRenameAction(target.dataset.id, state)).catch(reportActionFailure);
+    Promise.resolve(handleNamesAction(target.dataset.act, target.dataset.id, state)).catch(reportActionFailure);
   });
 
   state.reload = () =>
@@ -322,23 +332,174 @@ function renderServiceNamesView() {
   state.reload();
 }
 
-function renderNamesList(state) {
-  state.report = serviceNameReport(state.vehicles);
-  document.getElementById("names-list").innerHTML = state.report.length
-    ? `<div class="list">${state.report.map(nameRowHtml).join("")}</div>`
-    : `<p class="empty small">Nothing logged yet. A name shows up here as soon as a vehicle has a
-       schedule entry or a service record.</p>`;
+function handleNamesAction(action, id, state) {
+  switch (action) {
+    case "toggle-name":
+      if (state.expandedNames.has(id)) state.expandedNames.delete(id);
+      else state.expandedNames.add(id);
+      renderNamesList(state);
+      return null;
+    case "edit-name":
+      return handleRenameAction(id, state);
+    case "start-merge":
+      state.mergeMode = true;
+      state.mergeSelected = new Set();
+      renderNamesList(state);
+      return null;
+    case "cancel-merge":
+      state.mergeMode = false;
+      state.mergeSelected = new Set();
+      renderNamesList(state);
+      return null;
+    case "toggle-merge-select":
+      if (state.mergeSelected.has(id)) state.mergeSelected.delete(id);
+      else state.mergeSelected.add(id);
+      renderNamesList(state);
+      return null;
+    case "do-merge":
+      return handleMergeAction(state);
+    default:
+      return null;
+  }
 }
 
-function nameRowHtml(entry) {
-  return `
-    <div class="row tappable" data-act="edit-name" data-id="${escapeHtml(entry.key)}">
-      <div class="row-main">
-        <span class="row-title-text">${escapeHtml(entry.name)}</span>
-        <span class="row-meta">${entry.vehicles} vehicle${entry.vehicles === 1 ? "" : "s"} · ${entry.records} record${entry.records === 1 ? "" : "s"}</span>
+function renderNamesList(state) {
+  state.report = serviceNameReport(state.vehicles);
+  const listEl = document.getElementById("names-list");
+
+  if (!state.report.length) {
+    listEl.innerHTML = `<p class="empty small">Nothing logged yet. A name shows up here as soon as a vehicle has a
+       schedule entry or a service record.</p>`;
+    return;
+  }
+
+  listEl.innerHTML = `
+    <div class="section-title row-title">
+      <span>${state.report.length} name${state.report.length === 1 ? "" : "s"}</span>
+      <div class="heading-actions">
+        ${
+          state.report.length > 1
+            ? `<button class="secondary small" data-act="${state.mergeMode ? "cancel-merge" : "start-merge"}">${state.mergeMode ? "Cancel" : "Merge"}</button>`
+            : ""
+        }
       </div>
     </div>
+    ${
+      state.mergeMode
+        ? `<p class="hint">Two or more names for the same job? Pick them and merge into
+           one — you choose which spelling wins.</p>`
+        : ""
+    }
+    <div class="list">${state.report.map((entry) => nameRowHtml(entry, state)).join("")}</div>
+    ${
+      state.mergeMode && state.mergeSelected.size > 1
+        ? `<button class="secondary full-action" data-act="do-merge">Merge ${state.mergeSelected.size} names</button>`
+        : ""
+    }
   `;
+}
+
+function nameRowHtml(entry, state) {
+  const meta = `${entry.vehicles} vehicle${entry.vehicles === 1 ? "" : "s"} · ${entry.records} record${entry.records === 1 ? "" : "s"}`;
+
+  if (state.mergeMode) {
+    const picked = state.mergeSelected.has(entry.key);
+    return `
+      <div class="row tappable ${picked ? "picked" : ""}" data-act="toggle-merge-select" data-id="${escapeHtml(entry.key)}">
+        <input class="row-check" type="checkbox" tabindex="-1" ${picked ? "checked" : ""} />
+        <div class="row-main">
+          <span class="row-title-text">${escapeHtml(entry.name)}</span>
+          <span class="row-meta">${meta}</span>
+        </div>
+      </div>
+    `;
+  }
+
+  const open = state.expandedNames.has(entry.key);
+  return `
+    <div class="row tappable" data-act="toggle-name" data-id="${escapeHtml(entry.key)}" aria-expanded="${open}">
+      <div class="row-main">
+        <span class="row-title-text">${escapeHtml(entry.name)}</span>
+        <span class="row-meta">${meta}</span>
+      </div>
+      <div class="row-side">
+        <span class="status-caret">${open ? "▾" : "▸"}</span>
+        <button class="secondary small" data-act="edit-name" data-id="${escapeHtml(entry.key)}">Rename</button>
+      </div>
+    </div>
+    ${open ? `<div class="list status-jobs">${nameDetailHtml(entry, state.vehicles)}</div>` : ""}
+  `;
+}
+
+// Which vehicles carry this name, and when it was last actually done on each
+// -- the drill-down a bare count can't answer. "Last done" only counts a
+// completed record; a schedule entry or a booked-but-not-done job that shares
+// the name still puts the vehicle in the list, just with nothing done yet.
+function nameDetailHtml(entry, vehicles) {
+  const rows = entry.vehicleIds
+    .map((id) => vehicles.find((v) => v.id === id))
+    .filter(Boolean)
+    .sort((a, b) => a.name.localeCompare(b.name));
+
+  return rows
+    .map((vehicle) => {
+      const last = lastDoneFor(entry.key, vehicle.services || []);
+      const lastText = last
+        ? `last done ${[
+            last.servicedOn ? formatISO(last.servicedOn) : null,
+            last.odometerMiles !== null ? `at ${formatMiles(last.odometerMiles)}` : null,
+          ]
+            .filter(Boolean)
+            .join(" ")}`
+        : "not logged yet";
+      return `
+        <div class="row plan-row">
+          <div class="row-main">
+            <span class="row-title-text">${escapeHtml(vehicle.name)}</span>
+            <span class="row-meta">${escapeHtml(lastText)}</span>
+          </div>
+          <div class="row-side">
+            <a class="ghost btn" href="?vehicle=${encodeURIComponent(vehicle.id)}">Open</a>
+          </div>
+        </div>
+      `;
+    })
+    .join("");
+}
+
+// Two or more existing names, folded into whichever one the person picks --
+// same underlying rewrite as a single rename, just aimed at every loser in
+// one pass instead of asking for each by hand.
+async function handleMergeAction(state) {
+  if (state.mergeSelected.size < 2) return;
+  const entries = state.report.filter((row) => state.mergeSelected.has(row.key));
+
+  const winnerKey = await openPickerModal({
+    title: "Merge as which name?",
+    options: entries.map((row) => ({
+      value: row.key,
+      label: `${row.name} (${row.vehicles} vehicle${row.vehicles === 1 ? "" : "s"} · ${row.records} record${row.records === 1 ? "" : "s"})`,
+    })),
+  });
+  if (!winnerKey) return;
+
+  const winner = entries.find((row) => row.key === winnerKey);
+  let recordsTouched = 0;
+  for (const loser of entries) {
+    if (loser.key === winner.key) continue;
+    const result = await renameServiceEverywhere(state.vehicles, loser.name, winner.name);
+    recordsTouched += result.records;
+  }
+
+  showToast(
+    recordsTouched
+      ? `Merged into "${winner.name}" — ${recordsTouched} record${recordsTouched === 1 ? "" : "s"} updated`
+      : "Nothing needed changing"
+  );
+
+  state.mergeMode = false;
+  state.mergeSelected = new Set();
+  await state.reload();
 }
 
 async function handleRenameAction(key, state) {
@@ -1837,19 +1998,40 @@ function openAddServiceMenu(state, odometerMiles) {
   });
 }
 
+// Editing one already-scheduled job keeps its own name field -- there's only
+// ever one title to change. Adding new ones offers a line per job instead, so
+// a whole visit's worth (inspection, wipers, cabin filter, all due at once)
+// can be booked in one pass, sharing the date, mileage, shop, parts and notes
+// below. Parts entered here land on the first job listed, not every one of
+// them -- the buy list adds a job's partsNeeded across every pressing row, so
+// putting the same list on several new jobs would count each part several
+// times over. Add parts to any other job afterward by editing it on its own.
 async function openScheduleServiceForm(state, existing, odometerMiles) {
   const values = await openFormModal({
     title: existing ? "Edit scheduled service" : "Schedule service",
-    hint: "Set a date, a mileage, or both — whichever comes first is what the reminder goes by.",
+    hint: existing
+      ? "Set a date, a mileage, or both — whichever comes first is what the reminder goes by."
+      : "Set a date, a mileage, or both — whichever comes first is what the reminder goes by. Add a line for each job due at the same time.",
     fields: [
-      {
-        name: "title",
-        label: "Service",
-        type: "text",
-        value: existing?.title || "",
-        placeholder: "Oil change",
-        suggestions: serviceSuggestions(state),
-      },
+      existing
+        ? {
+            name: "title",
+            label: "Service",
+            type: "text",
+            value: existing.title || "",
+            placeholder: "Oil change",
+            suggestions: serviceSuggestions(state),
+          }
+        : {
+            name: "titles",
+            label: "Services",
+            type: "list",
+            titlesOnly: true,
+            itemPlaceholder: "Oil change",
+            addLabel: "+ Add another job",
+            value: [],
+            suggestions: serviceSuggestions(state),
+          },
       { name: "dueOn", label: "Due date", type: "date", half: true, value: existing?.dueOn || "" },
       {
         name: "dueOdometer",
@@ -1876,14 +2058,17 @@ async function openScheduleServiceForm(state, existing, odometerMiles) {
         value: existing?.partsNeeded || [],
         catalogue: state.parts || [],
         vehicleId: state.id,
-        hint: "Nothing leaves the shelf until the job is marked done — this is so you know what to have in.",
+        hint: existing
+          ? "Nothing leaves the shelf until the job is marked done — this is so you know what to have in."
+          : "Nothing leaves the shelf until the job is marked done. Adding more than one job above? This applies to the first one listed.",
       },
       { name: "notes", label: "Notes (optional)", type: "textarea", value: existing?.notes || "" },
     ],
     submitLabel: existing ? "Save changes" : "Schedule it",
     destructive: existing ? { label: "Delete this service" } : null,
     validate: (v) => {
-      if (!v.title) return "What service is it?";
+      const titled = existing ? !!v.title : (v.titles || []).some((item) => item.title);
+      if (!titled) return "What service is it?";
       if (!v.dueOn && !v.dueOdometer) return "Add a due date, a due mileage, or both.";
       if (v.dueOdometer && !Number.isFinite(Number(v.dueOdometer))) return "That mileage doesn't look right.";
       return null;
@@ -1895,31 +2080,41 @@ async function openScheduleServiceForm(state, existing, odometerMiles) {
     return;
   }
 
-  const payload = {
-    title: values.title,
+  const shared = {
     status: "scheduled",
     dueOn: values.dueOn || null,
     dueOdometerMiles: values.dueOdometer ? Math.round(Number(values.dueOdometer)) : null,
     shop: values.shop || null,
     notes: values.notes || null,
-    partsNeeded: values.partsNeeded || [],
   };
 
   if (existing) {
-    await updateDoc(doc(db, "vehicles", state.id, "services", existing.id), payload);
-  } else {
-    await addDoc(collection(db, "vehicles", state.id, "services"), {
-      ...payload,
-      servicedOn: null,
-      odometerMiles: null,
-      costCents: null,
-      parts: null,
-      repeatMiles: null,
-      repeatMonths: null,
-      createdAt: serverTimestamp(),
+    await updateDoc(doc(db, "vehicles", state.id, "services", existing.id), {
+      ...shared,
+      title: values.title,
+      partsNeeded: values.partsNeeded || [],
     });
+    showToast("Service updated");
+  } else {
+    const titles = (values.titles || []).map((item) => item.title).filter(Boolean);
+    await Promise.all(
+      titles.map((title, index) =>
+        addDoc(collection(db, "vehicles", state.id, "services"), {
+          ...shared,
+          title,
+          partsNeeded: index === 0 ? values.partsNeeded || [] : [],
+          servicedOn: null,
+          odometerMiles: null,
+          costCents: null,
+          parts: null,
+          repeatMiles: null,
+          repeatMonths: null,
+          createdAt: serverTimestamp(),
+        })
+      )
+    );
+    showToast(titles.length > 1 ? `${titles.length} services scheduled` : "Service scheduled");
   }
-  showToast(existing ? "Service updated" : "Service scheduled");
   await recomputeSummary(state.id);
 }
 
@@ -2395,7 +2590,7 @@ function scheduleBodyHtml(state) {
     ${
       rows.length
         ? `<div class="list schedule-list">${rows
-            .map((row) => scheduleRowHtml(row, odometerMiles, onTheList))
+            .map((row) => scheduleRowHtml(row, odometerMiles, onTheList, state.parts))
             .join("")}</div>`
         : `<p class="empty small">Nothing set up yet. Add the jobs this vehicle needs on a
            schedule — an oil change every 5,000 miles, an inspection every year — and this page
@@ -2411,7 +2606,7 @@ function intervalText(entry) {
   return parts.join(" or ") || "no interval set";
 }
 
-function scheduleRowHtml(row, odometerMiles, onTheList) {
+function scheduleRowHtml(row, odometerMiles, onTheList, parts) {
   const lastDone = row.lastDone
     ? `last done ${[
         row.lastDone.servicedOn ? formatISO(row.lastDone.servicedOn) : null,
@@ -2447,6 +2642,7 @@ function scheduleRowHtml(row, odometerMiles, onTheList) {
         <span class="row-meta">${escapeHtml(intervalText(row))}</span>
         <span class="row-meta">${escapeHtml(lastDone)}</span>
         ${next}
+        ${partsNeededHtml(row, parts)}
       </div>
       <div class="row-side">
         <span class="badge ${row.status.key}">${escapeHtml(row.status.label)}</span>
@@ -2513,6 +2709,15 @@ async function openPlanForm(state, existing) {
         value: existing?.everyMonths != null ? String(existing.everyMonths) : "",
         placeholder: "6",
       },
+      {
+        name: "partsNeeded",
+        label: "Parts needed (optional)",
+        type: "parts",
+        value: existing?.partsNeeded || [],
+        catalogue: state.parts || [],
+        vehicleId: state.id,
+        hint: "What this job uses every time it comes round. Add to list carries this over onto the booked job — nothing leaves the shelf until it's actually marked done.",
+      },
     ],
     submitLabel: existing ? "Save changes" : "Add it",
     destructive: existing ? { label: "Remove from the schedule" } : null,
@@ -2534,6 +2739,7 @@ async function openPlanForm(state, existing) {
     title: values.title,
     everyMiles: values.everyMiles ? Math.round(Number(values.everyMiles)) : null,
     everyMonths: values.everyMonths ? Math.round(Number(values.everyMonths)) : null,
+    partsNeeded: values.partsNeeded || [],
   };
 
   if (existing) {
@@ -2547,8 +2753,9 @@ async function openPlanForm(state, existing) {
 // Turns a due entry into a real scheduled job, so it appears in the vehicle's
 // service list and on the garage badge alongside anything booked in by hand.
 //
-// A schedule entry carries no parts list of its own -- only a title and an
-// interval -- so `partsNeeded` comes from the caller, not from `entry`.
+// `partsNeeded` comes from the caller rather than being read off `entry`
+// directly -- the schedule page passes the entry's own list, but a caller is
+// free to book the same entry without one.
 // Hands back what it wrote, so a caller holding its own copy of the garage
 // could move the row across without reading it all again.
 async function bookScheduleEntry(vehicleId, entry, services, { partsNeeded = [] } = {}) {
@@ -2581,10 +2788,10 @@ async function bookScheduleEntry(vehicleId, entry, services, { partsNeeded = [] 
   return { id: added.id, ...payload };
 }
 
-// "Add to list" opens straight to this rather than a full schedule-service
-// sheet -- the date and mileage the entry is due by are already decided by
-// the schedule, so the only thing left to ask is what it'll need off the
-// shelf, and only if there's something to ask.
+// One tap, no sheet: everything "Add to list" needs is already decided by the
+// schedule entry itself -- the date or mileage it's due by, and now what it
+// needs off the shelf too, set once on the entry rather than asked again on
+// every occurrence it comes due.
 async function bookPlanEntry(state, id) {
   const odometerMiles = currentOdometer(state.vehicle, state.fillups, state.services);
   const row = scheduleRows(state.schedule, state.services, {
@@ -2593,25 +2800,7 @@ async function bookPlanEntry(state, id) {
     vehicleYear: state.vehicle.year,
   }).find((entry) => entry.id === id);
   if (!row) return;
-
-  const values = await openFormModal({
-    title: `Add "${row.title}" to the list`,
-    fields: [
-      {
-        name: "partsNeeded",
-        label: "Parts needed (optional)",
-        type: "parts",
-        value: [],
-        catalogue: state.parts || [],
-        vehicleId: state.id,
-        hint: "Nothing leaves the shelf until the job is marked done — this is so you know what to have in.",
-      },
-    ],
-    submitLabel: "Add to list",
-  });
-  if (!values) return;
-
-  await bookScheduleEntry(state.id, row, state.services, { partsNeeded: values.partsNeeded || [] });
+  await bookScheduleEntry(state.id, row, state.services, { partsNeeded: row.partsNeeded || [] });
 }
 
 // Moves the shelf by the difference between what a record used to book and what

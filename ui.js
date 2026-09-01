@@ -293,7 +293,7 @@ function renderField(field) {
         <label>${escapeHtml(label)}</label>
         <div class="item-list" data-list-rows="${escapeHtml(name)}"></div>
         <div class="item-list-foot">
-          <button type="button" class="secondary small" data-list-add="${escapeHtml(name)}">+ Add item</button>
+          <button type="button" class="secondary small" data-list-add="${escapeHtml(name)}">${escapeHtml(field.addLabel || "+ Add item")}</button>
           <span class="item-total" data-list-total="${escapeHtml(name)}"></span>
         </div>
         ${hintHtml}
@@ -844,6 +844,12 @@ function bindListField(overlay, field) {
   // Rows carry an id of their own because another field points at them, and
   // position won't do for that: removing the first line would silently move
   // every part booked against the second onto the third.
+  // A titlesOnly list (several jobs booked together, none of them done yet)
+  // has no cost or notes to carry -- those belong to a visit that's happened,
+  // not one still on the calendar -- so those two inputs, and the running
+  // total they feed, simply don't exist for it.
+  const titlesOnly = !!field.titlesOnly;
+
   let nextId = 0;
   let rows = (field.value || []).map((item) => ({
     id: ++nextId,
@@ -857,12 +863,13 @@ function bindListField(overlay, field) {
     rows = [...rowsEl.querySelectorAll("[data-item-row]")].map((row, index) => ({
       id: rows[index] ? rows[index].id : ++nextId,
       title: row.querySelector("[data-item-title]").value,
-      cost: row.querySelector("[data-item-cost]").value,
-      notes: row.querySelector("[data-item-notes]").value,
+      cost: row.querySelector("[data-item-cost]")?.value || "",
+      notes: row.querySelector("[data-item-notes]")?.value || "",
     }));
   };
 
   const updateTotal = () => {
+    if (titlesOnly) return;
     const cents = [...rowsEl.querySelectorAll("[data-item-cost]")].reduce((sum, input) => {
       const value = dollarsToCents(input.value);
       return sum + (input.value && Number.isFinite(value) ? value : 0);
@@ -876,15 +883,23 @@ function bindListField(overlay, field) {
         (row, index) => `
         <div class="item-row" data-item-row>
           <div class="item-row-top">
-            <input data-item-title type="text" placeholder="What was done" value="${escapeHtml(row.title)}"
-                   autocomplete="off" />
-            <input data-item-cost type="number" step="0.01" min="0" inputmode="decimal"
-                   placeholder="Cost" value="${escapeHtml(row.cost)}" />
+            <input data-item-title type="text" placeholder="${escapeHtml(field.itemPlaceholder || "What was done")}"
+                   value="${escapeHtml(row.title)}" autocomplete="off" />
+            ${
+              titlesOnly
+                ? ""
+                : `<input data-item-cost type="number" step="0.01" min="0" inputmode="decimal"
+                   placeholder="Cost" value="${escapeHtml(row.cost)}" />`
+            }
             <button type="button" class="item-remove" data-item-remove="${index}"
                     title="Remove this item" ${rows.length === 1 ? "disabled" : ""}>×</button>
           </div>
-          <input data-item-notes type="text" placeholder="Notes for this item (optional)"
-                 value="${escapeHtml(row.notes)}" autocomplete="off" />
+          ${
+            titlesOnly
+              ? ""
+              : `<input data-item-notes type="text" placeholder="Notes for this item (optional)"
+                 value="${escapeHtml(row.notes)}" autocomplete="off" />`
+          }
         </div>`
       )
       .join("");
