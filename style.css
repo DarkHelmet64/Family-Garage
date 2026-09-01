@@ -664,6 +664,55 @@ textarea { resize: vertical; }
   .modal { border-radius: var(--radius); max-height: 88vh; }
 }
 
+/* ---------------------------------------------------------------------------
+   Tablet
+  
+   Below this the app is a single reading column, capped narrow on purpose --
+   a phone screen has nothing wider to offer. A tablet does, and left alone
+   the same column just sits in the middle of it with the rest as gutter. So
+   past this width the column itself widens, and the three screens that are
+   really a flat list of interchangeable cards -- the garage's own vehicles,
+   its look-ahead grouped by vehicle, and the parts shelf -- grid two of them
+   across instead of stretching one to fill the space. Everything else (a
+   vehicle's own page, forms, the schedule, the gas log) stays the single
+   column it always was, just with more air around it: those already read
+   left-to-right rather than as a set of peers, and forcing them into a grid
+   would cut across that rather than use the width well.
+   --------------------------------------------------------------------------- */
+@media (min-width: 768px) {
+  #app { max-width: 760px; }
+
+  /* Only once there's a second card to grid against -- an empty garage's
+     "No vehicles yet" and its Add button are two lines of one message, not a
+     pair of cards, and gridding them would read as though they were. */
+  #vehicle-list:has(.card + .card),
+  #coming-up .plan-vehicles,
+  #parts-list .list {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    align-items: start;
+    gap: 14px;
+  }
+
+  /* Each card's own margin-bottom would double up with the grid's row gap,
+     so it's zeroed on the cards themselves -- and moved to the container, so
+     the space this used to leave before whatever comes next (the parts
+     button) doesn't disappear along with it. Scoped like the grid itself, so
+     a single vehicle (never gridded) is untouched. */
+  #vehicle-list:has(.card + .card) {
+    margin-bottom: 14px;
+  }
+  #vehicle-list:has(.card + .card) .card {
+    margin-bottom: 0;
+  }
+
+  /* A grid item is its own block-formatting context, so this would otherwise
+     lose the top margin that separates one vehicle's block from the last. */
+  #coming-up .plan-vehicles > .plan-vehicle:nth-child(-n + 2) .section-title {
+    margin-top: 0;
+  }
+}
+
 @keyframes slideup {
   from { transform: translateY(20px); opacity: 0; }
   to { transform: translateY(0); opacity: 1; }
@@ -1160,6 +1209,24 @@ input[type="file"] {
 
 .item-row select[data-part-id] { flex: 1 1 auto; min-width: 0; }
 .item-row input[data-part-qty] { flex: 0 0 78px; }
+
+/* A history row available to pick for combining, and once picked. */
+.row-check {
+  align-self: center;
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  accent-color: var(--brand);
+  /* The row itself is what's clickable -- see the delegated handler -- so the
+     checkbox only ever reflects state, it never fights the row for the click
+     that set it. */
+  pointer-events: none;
+}
+
+.row.picked {
+  border-color: var(--brand);
+  box-shadow: inset 0 0 0 1px var(--brand);
+}
 
 .part-row.negative {
   box-shadow: inset 4px 0 0 var(--red);

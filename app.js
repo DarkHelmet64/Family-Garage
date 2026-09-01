@@ -52,6 +52,7 @@ import {
   isLowStock,
   upcomingWork,
   partsForecast,
+  serviceNameReport,
   STATS_VERSION,
 } from "./stats.js";
 
@@ -65,6 +66,7 @@ const vehicleId = params.get("vehicle");
 const isNewVehiclePage = params.has("new");
 const isSchedulePage = params.has("schedule");
 const isPartsPage = params.has("parts");
+const isNamesPage = params.has("names");
 
 // Common services, offered as a datalist so the same wording gets reused across
 // vehicles instead of "Oil change" / "oil chg" / "Oil".
@@ -96,6 +98,8 @@ function route() {
     renderNewVehicleView();
   } else if (isPartsPage) {
     renderPartsView();
+  } else if (isNamesPage) {
+    renderServiceNamesView();
   } else if (vehicleId && isSchedulePage) {
     renderScheduleView(vehicleId);
   } else if (vehicleId) {
@@ -261,12 +265,193 @@ function openGarageMenu() {
     title: "More",
     options: [
       { value: "new", label: "+ Add a vehicle" },
+      { value: "names", label: "🏷️ Service names" },
       { value: "qr", label: "Show QR code" },
     ],
   }).then((choice) => {
     if (choice === "new") location.search = "?new";
+    else if (choice === "names") location.search = "?names";
     else if (choice === "qr") openQrModal(siteUrl(), "Scan to open Family Garage");
   });
+}
+
+// ---------------------------------------------------------------------------
+// Service names
+//
+// The same job ends up typed a few different ways over the years -- "Oil chg",
+// "oil change", "Oil Change" -- and everything that matches on a job's name --
+// the schedule deciding what's already booked, the suggestion list, the badge
+// on the garage card -- treats each spelling as a different job. This is a
+// register of every name in the garage, with a way to fix one everywhere at
+// once: the schedule entry, the booked job, and every past visit that used it,
+// on every vehicle.
+//
+// Read once when the page opens, the same as the look-ahead and for the same
+// reason: answering it needs every vehicle's schedule and service records, not
+// just the vehicle documents, so there's real reading to do first.
+// ---------------------------------------------------------------------------
+
+function renderServiceNamesView() {
+  $app.innerHTML = `
+    <a class="back-link" href="./">&larr; Garage</a>
+    <h1><span class="emoji">🏷️</span>Service names</h1>
+    <p class="hint">Every job name in use across the garage. Rename one and it updates
+    every schedule entry, booked job, and past visit that used it — on every vehicle.</p>
+    <div id="names-list"><p class="loading">Reading the whole garage…</p></div>
+  `;
+
+  const state = { vehicles: [], report: [] };
+
+  $app.addEventListener("click", (event) => {
+    const target = event.target.closest("[data-act=edit-name]");
+    if (!target) return;
+    Promise.resolve(handleRenameAction(target.dataset.id, state)).catch(reportActionFailure);
+  });
+
+  state.reload = () =>
+    loadGarage()
+      .then((loaded) => {
+        state.vehicles = loaded.vehicles;
+        renderNamesList(state);
+      })
+      .catch((err) => {
+        document.getElementById("names-list").innerHTML =
+          `<p class="empty">Couldn't read the whole garage.<br /><span class="hint">${escapeHtml(err.message)}</span></p>`;
+      });
+
+  state.reload();
+}
+
+function renderNamesList(state) {
+  state.report = serviceNameReport(state.vehicles);
+  document.getElementById("names-list").innerHTML = state.report.length
+    ? `<div class="list">${state.report.map(nameRowHtml).join("")}</div>`
+    : `<p class="empty small">Nothing logged yet. A name shows up here as soon as a vehicle has a
+       schedule entry or a service record.</p>`;
+}
+
+function nameRowHtml(entry) {
+  return `
+    <div class="row tappable" data-act="edit-name" data-id="${escapeHtml(entry.key)}">
+      <div class="row-main">
+        <span class="row-title-text">${escapeHtml(entry.name)}</span>
+        <span class="row-meta">${entry.vehicles} vehicle${entry.vehicles === 1 ? "" : "s"} · ${entry.records} record${entry.records === 1 ? "" : "s"}</span>
+      </div>
+    </div>
+  `;
+}
+
+async function handleRenameAction(key, state) {
+  const entry = state.report.find((row) => row.key === key);
+  if (!entry) return;
+
+  const values = await openFormModal({
+    title: "Rename service",
+    hint: `Changes every "${entry.name}" across ${entry.vehicles} vehicle${entry.vehicles === 1 ? "" : "s"} — the schedule entry, any booked job, and every past visit that used it.`,
+    fields: [
+      {
+        name: "name",
+        label: "Name",
+        type: "text",
+        value: entry.name,
+        suggestions: state.report.map((row) => row.name),
+      },
+    ],
+    submitLabel: "Rename everywhere",
+    validate: (v) => (v.name ? null : "What should it be called?"),
+  });
+  if (!values) return;
+
+  const result = await renameServiceEverywhere(state.vehicles, entry.name, values.name);
+  showToast(
+    result.vehicles
+      ? `Renamed on ${result.vehicles} vehicle${result.vehicles === 1 ? "" : "s"} — ${result.records} record${result.records === 1 ? "" : "s"} updated`
+      : "Nothing needed changing"
+  );
+  await state.reload();
+}
+
+// Rewrites `oldName` to `newName` everywhere it appears: the schedule entries
+// that name it, the booked jobs that name it, every item on a past visit that
+// named it, and which job a booked part was for, since that's recorded by name
+// too. Matching is case-and-spacing-insensitive, the same rule scheduling
+// already uses to decide two jobs are the same one -- so this doubles as a way
+// to normalize stray casing even when the name you type back is the one
+// already showing.
+//
+// One batch per vehicle that actually needs a write, so a vehicle the name
+// never touched costs nothing.
+async function renameServiceEverywhere(vehicles, oldName, newName) {
+  const wanted = normalizeJob(oldName);
+  let vehiclesTouched = 0;
+  let recordsTouched = 0;
+
+  for (const vehicle of vehicles) {
+    const batch = writeBatch(db);
+    let touchedThisVehicle = false;
+
+    for (const entry of vehicle.schedule || []) {
+      if (normalizeJob(entry.title) !== wanted || entry.title === newName) continue;
+      batch.update(doc(db, "vehicles", vehicle.id, "schedule", entry.id), { title: newName });
+      touchedThisVehicle = true;
+      recordsTouched += 1;
+    }
+
+    for (const record of vehicle.services || []) {
+      const ref = doc(db, "vehicles", vehicle.id, "services", record.id);
+
+      if (record.status !== "done") {
+        if (normalizeJob(record.title) !== wanted || record.title === newName) continue;
+        batch.update(ref, { title: newName });
+        touchedThisVehicle = true;
+        recordsTouched += 1;
+        continue;
+      }
+
+      const patch = {};
+      let changed = false;
+
+      if (Array.isArray(record.items) && record.items.length) {
+        let itemsChanged = false;
+        const items = record.items.map((item) => {
+          if (normalizeJob(item.title) !== wanted || item.title === newName) return item;
+          itemsChanged = true;
+          return { ...item, title: newName };
+        });
+        if (itemsChanged) {
+          patch.items = items;
+          // The record's own title tracks its first named item -- see
+          // visitTitle -- so a rename that touches that item keeps it in
+          // step rather than leaving it to read the old name.
+          patch.title = visitTitle(items);
+          changed = true;
+        }
+      } else if (normalizeJob(record.title) === wanted && record.title !== newName) {
+        patch.title = newName;
+        changed = true;
+      }
+
+      if ((record.parts || []).some((part) => part.forJob && normalizeJob(part.forJob) === wanted && part.forJob !== newName)) {
+        patch.parts = record.parts.map((part) =>
+          part.forJob && normalizeJob(part.forJob) === wanted ? { ...part, forJob: newName } : part
+        );
+        changed = true;
+      }
+
+      if (!changed) continue;
+      batch.update(ref, patch);
+      touchedThisVehicle = true;
+      recordsTouched += 1;
+    }
+
+    if (touchedThisVehicle) {
+      await batch.commit();
+      await recomputeSummary(vehicle.id);
+      vehiclesTouched += 1;
+    }
+  }
+
+  return { vehicles: vehiclesTouched, records: recordsTouched };
 }
 
 // ---------------------------------------------------------------------------
@@ -370,13 +555,19 @@ function renderComingUp(state) {
     byVehicle.get(row.vehicleId)[row.status.key].push(row);
   }
 
+  // Wrapped one div per vehicle -- not needed for phone width, where they just
+  // stack as they always did, but it gives a tablet layout something to grid:
+  // each vehicle's block placed as one unit rather than its heading and status
+  // counts drifting into separate columns.
   const sections = [...byVehicle.values()]
     .sort(byVehicleName)
     .map(
       (vehicle) => `
-      <div class="section-title">${escapeHtml(vehicle.name)}</div>
-      ${statusGroupHtml(vehicle, "overdue", "Overdue", state.expanded)}
-      ${statusGroupHtml(vehicle, "soon", "Due soon", state.expanded)}`
+      <div class="plan-vehicle">
+        <div class="section-title">${escapeHtml(vehicle.name)}</div>
+        ${statusGroupHtml(vehicle, "overdue", "Overdue", state.expanded)}
+        ${statusGroupHtml(vehicle, "soon", "Due soon", state.expanded)}
+      </div>`
     )
     .join("");
 
@@ -388,30 +579,34 @@ function renderComingUp(state) {
       .filter(Boolean)
       .join(" · ")}. Tap a count to see the jobs; open a vehicle for their dates and mileages.</p>
 
-    ${
-      shortages.length
-        ? `<div class="card shopping">
-             <div class="section-title">To buy</div>
-             ${shortages
-               .map(
-                 (need) => `<div class="shopping-row">
-                   <span>${escapeHtml(need.name)}</span>
-                   <span class="shopping-need">${need.short} ${escapeHtml(need.unit)} short<span class="muted"> · need ${need.quantity}, have ${need.have}</span></span>
-                   ${
-                     shoppingDetail(need)
-                       ? `<span class="shopping-detail">${escapeHtml(shoppingDetail(need))}</span>`
-                       : ""
-                   }
-                 </div>`
-               )
-               .join("")}
-           </div>`
-        : forecast.length
-          ? `<p class="hint ok-line">Everything these jobs need is on the shelf.</p>`
-          : ""
-    }
+    <div class="card shopping">
+      <div class="section-title">To buy</div>
+      ${
+        shortages.length
+          ? shortages
+              .map(
+                (need) => `<div class="shopping-row">
+                  <span>${escapeHtml(need.name)}</span>
+                  <span class="shopping-need">${need.short} ${escapeHtml(need.unit)} short<span class="muted"> · need ${need.quantity}, have ${need.have}</span></span>
+                  ${
+                    shoppingDetail(need)
+                      ? `<span class="shopping-detail">${escapeHtml(shoppingDetail(need))}</span>`
+                      : ""
+                  }
+                </div>`
+              )
+              .join("")
+          : forecast.length
+            ? `<p class="hint ok-line">Everything these jobs need is on the shelf.</p>`
+            : `<p class="hint">None of these jobs have parts listed yet. A job merely due
+               on the schedule doesn't carry a parts list of its own — <strong>Add to
+               list</strong> it from the vehicle's Service schedule and note what it
+               needs, or add a list to a job you've already booked, and it'll show up
+               here.</p>`
+      }
+    </div>
 
-    ${sections}
+    <div class="plan-vehicles">${sections}</div>
   `;
 }
 
@@ -894,6 +1089,8 @@ function renderVehicleView(id) {
     parts: [],
     showAllFillups: false,
     showHistory: false,
+    combineMode: false,
+    combineSelected: new Set(),
   };
 
   bodyEl.addEventListener("click", (event) => {
@@ -1019,9 +1216,31 @@ function vehicleBodyHtml(state) {
       history.length
         ? `<div class="section-title row-title">
              <span>Service history</span>
-             <button class="secondary small" data-act="toggle-history">${state.showHistory ? "Hide" : `Show (${history.length})`}</button>
+             <div class="heading-actions">
+               ${
+                 history.length > 1
+                   ? `<button class="secondary small" data-act="${state.combineMode ? "cancel-combine" : "start-combine"}">${state.combineMode ? "Cancel" : "Combine"}</button>`
+                   : ""
+               }
+               <button class="secondary small" data-act="toggle-history">${state.showHistory ? "Hide" : `Show (${history.length})`}</button>
+             </div>
            </div>
-           ${state.showHistory ? `<div class="list">${history.map((s) => serviceHistoryRowHtml(s)).join("")}</div>` : ""}`
+           ${
+             state.showHistory
+               ? `${
+                   state.combineMode
+                     ? `<p class="hint">Two visits that were really one trip? Pick them and combine into a
+                        single record — its costs, parts and photos all come along.</p>`
+                     : ""
+                 }
+                 <div class="list">${history.map((s) => serviceHistoryRowHtml(s, state)).join("")}</div>
+                 ${
+                   state.combineMode && state.combineSelected.size > 1
+                     ? `<button class="secondary full-action" data-act="do-combine">Combine ${state.combineSelected.size} records</button>`
+                     : ""
+                 }`
+               : ""
+           }`
         : ""
     }
 
@@ -1232,7 +1451,9 @@ function photoTagHtml(service) {
   return `<span class="row-tag photo">📎 ${count} receipt${count === 1 ? "" : "s"}</span>`;
 }
 
-function serviceHistoryRowHtml(service) {
+function serviceHistoryRowHtml(service, state) {
+  const combineMode = state.combineMode;
+  const picked = combineMode && state.combineSelected.has(service.id);
   const bits = [
     service.servicedOn ? formatISO(service.servicedOn) : null,
     service.odometerMiles !== null && service.odometerMiles !== undefined
@@ -1268,7 +1489,9 @@ function serviceHistoryRowHtml(service) {
   const heading = multiple && bits.length ? bits.join(" · ") : service.title;
 
   return `
-    <div class="row service-row done tappable" data-act="edit-service" data-id="${service.id}">
+    <div class="row service-row done tappable ${picked ? "picked" : ""}"
+         data-act="${combineMode ? "toggle-combine" : "edit-service"}" data-id="${service.id}">
+      ${combineMode ? `<input class="row-check" type="checkbox" tabindex="-1" ${picked ? "checked" : ""} />` : ""}
       <div class="row-main">
         <span class="row-title-text${multiple ? " visit-heading" : ""}">${escapeHtml(heading)}</span>
         ${multiple ? "" : `<span class="row-meta">${escapeHtml(bits.join(" · "))}</span>`}
@@ -1362,9 +1585,51 @@ function handleVehicleAction(action, id, state) {
       state.showHistory = !state.showHistory;
       document.getElementById("vehicle-body").innerHTML = vehicleBodyHtml(state);
       return null;
+    case "start-combine":
+      state.combineMode = true;
+      state.showHistory = true;
+      state.combineSelected = new Set();
+      document.getElementById("vehicle-body").innerHTML = vehicleBodyHtml(state);
+      return null;
+    case "cancel-combine":
+      state.combineMode = false;
+      state.combineSelected = new Set();
+      document.getElementById("vehicle-body").innerHTML = vehicleBodyHtml(state);
+      return null;
+    case "toggle-combine":
+      if (state.combineSelected.has(id)) state.combineSelected.delete(id);
+      else state.combineSelected.add(id);
+      document.getElementById("vehicle-body").innerHTML = vehicleBodyHtml(state);
+      return null;
+    case "do-combine":
+      return combineServiceRecords(state, odometerMiles);
     default:
       return null;
   }
+}
+
+// Turns two or more already-logged visits into one. Chosen by hand rather
+// than guessed at -- there's no reliable signal (same day? same shop?) that a
+// separate record wasn't in fact a separate trip -- so this only ever acts on
+// records the person picked.
+async function combineServiceRecords(state, odometerMiles) {
+  const records = state.services.filter((service) => state.combineSelected.has(service.id));
+  if (records.length < 2) return;
+
+  // Earliest first: that record keeps its id, its date, and its odometer
+  // reading (all now presumed correct for the combined visit), and the rest
+  // fold into it. Its own receipt photos need no migrating for the same
+  // reason -- they're already filed under the id that's about to hold
+  // everything else too.
+  const [target, ...combining] = [...records].sort((a, b) =>
+    String(a.servicedOn || "").localeCompare(String(b.servicedOn || ""))
+  );
+
+  await openCompletedServiceForm(state, target, odometerMiles, { combining });
+
+  state.combineMode = false;
+  state.combineSelected = new Set();
+  document.getElementById("vehicle-body").innerHTML = vehicleBodyHtml(state);
 }
 
 // What to say when an action fails. A refusal from the database is worth
@@ -1664,16 +1929,32 @@ async function openScheduleServiceForm(state, existing, odometerMiles) {
 // come off the list once the visit is saved, and only for the jobs that were
 // still on the sheet when it was -- taking a line off is how you say you didn't
 // have that one done after all.
-async function openCompletedServiceForm(state, existing, odometerMiles, { completing = false, folding = null } = {}) {
+//
+// `combining` is different: a list of already-done records the person picked
+// by hand to merge into `existing`. Everything about them -- their items,
+// their parts, their photos -- moves onto `existing` unconditionally, and they
+// are then deleted. Unlike folding there's no partial-match safety valve:
+// picking records to combine is already the deliberate step, so there's
+// nothing left to second-guess once the sheet opens.
+async function openCompletedServiceForm(state, existing, odometerMiles, { completing = false, folding = null, combining = null } = {}) {
   const isEditingDone = existing && existing.status === "done";
-  const [{ photos: existingPhotos, error: photoError }, shops] = await Promise.all([
+  const [{ photos: existingPhotos, error: photoError }, shops, combiningPhotos] = await Promise.all([
     existing ? loadServicePhotos(state.id, existing.id) : { photos: [], error: null },
     knownShops(state),
+    combining ? Promise.all(combining.map((record) => loadServicePhotos(state.id, record.id))) : [],
   ]);
+  // Photos already on a record being merged in read as if they were already on
+  // this one -- stripped of their old id, so saving writes them fresh under
+  // this record instead of trying to update someone else's document.
+  const mergedPhotos = combining
+    ? [...existingPhotos, ...combiningPhotos.flatMap((loaded) => loaded.photos).map(({ id, ...rest }) => rest)]
+    : existingPhotos;
   const values = await openFormModal({
-    title: folding
-      ? "Log these as one visit"
-      : completing
+    title: combining
+      ? "Combine into one visit"
+      : folding
+        ? "Log these as one visit"
+        : completing
         ? "Mark service done"
         : isEditingDone
           ? "Edit service record"
@@ -1683,11 +1964,19 @@ async function openCompletedServiceForm(state, existing, odometerMiles, { comple
         name: "items",
         label: "What was done",
         type: "list",
-        value: existing ? serviceItems(existing) : folding ? folding.flatMap((record) => serviceItems(record)) : [],
+        value: combining
+          ? [...serviceItems(existing), ...combining.flatMap((record) => serviceItems(record))]
+          : existing
+            ? serviceItems(existing)
+            : folding
+              ? folding.flatMap((record) => serviceItems(record))
+              : [],
         suggestions: serviceSuggestions(state),
-        hint: folding
-          ? "Everything on the service list, as one trip. Put a cost against each job, and take off any line you didn't have done — those stay on the list."
-          : "One trip, several jobs — add a line for each. The total is added up for you.",
+        hint: combining
+          ? "Everything from the records you picked, as one trip. Their costs and parts came with them — check the total before saving."
+          : folding
+            ? "Everything on the service list, as one trip. Put a cost against each job, and take off any line you didn't have done — those stay on the list."
+            : "One trip, several jobs — add a line for each. The total is added up for you.",
       },
       {
         name: "servicedOn",
@@ -1715,7 +2004,7 @@ async function openCompletedServiceForm(state, existing, odometerMiles, { comple
         label: "Shop (optional)",
         type: "text",
         half: true,
-        value: existing?.shop || (folding ? sharedShop(folding) : "") || "",
+        value: combining ? sharedShop([existing, ...combining]) : existing?.shop || (folding ? sharedShop(folding) : "") || "",
         placeholder: "Dave's Auto",
         suggestions: shops,
       },
@@ -1725,7 +2014,9 @@ async function openCompletedServiceForm(state, existing, odometerMiles, { comple
         type: "parts",
         // Marking a scheduled job done starts from the parts it said it needed;
         // a whole visit starts from what all of its jobs did, added up.
-        value: existing?.parts || (completing ? existing?.partsNeeded : null) || (folding ? partsNeededAcross(folding) : null) || [],
+        value: combining
+          ? [...(existing?.parts || []), ...combining.flatMap((record) => record.parts || [])]
+          : existing?.parts || (completing ? existing?.partsNeeded : null) || (folding ? partsNeededAcross(folding) : null) || [],
         catalogue: state.parts || [],
         vehicleId: state.id,
         // What the shelf says these cost can be dropped onto one of the jobs
@@ -1737,7 +2028,7 @@ async function openCompletedServiceForm(state, existing, odometerMiles, { comple
         name: "photos",
         label: "Receipt photos (optional)",
         type: "photos",
-        value: existingPhotos,
+        value: mergedPhotos,
         hint: photoError
           ? "Receipts couldn't be loaded — publish firestore.rules from the repo in your Firebase console. Everything else here still saves."
           : "Photographed receipts are shrunk to fit before they're saved — enough to read, not enough to fill up your database.",
@@ -1763,7 +2054,7 @@ async function openCompletedServiceForm(state, existing, odometerMiles, { comple
         placeholder: "6",
       },
     ],
-    submitLabel: folding ? "Log the visit" : completing ? "Mark done" : "Save",
+    submitLabel: combining ? "Combine records" : folding ? "Log the visit" : completing ? "Mark done" : "Save",
     destructive: isEditingDone ? { label: "Delete this service record" } : null,
     validate: (v) => {
       const named = (v.items || []).filter((item) => item.title);
@@ -1821,8 +2112,14 @@ async function openCompletedServiceForm(state, existing, odometerMiles, { comple
   }
   // What was already booked against this record is given back before the new
   // list is taken off, so editing a saved visit moves the shelf by the
-  // difference rather than charging it twice.
-  await applyPartUsage(existing?.parts || [], partsUsed);
+  // difference rather than charging it twice. Combining folds in what the
+  // merged-away records had already booked too -- those parts left the shelf
+  // once, when each visit was first logged, and moving them onto this record
+  // isn't a second trip to the shelf.
+  const partsBefore = combining
+    ? [...(existing?.parts || []), ...combining.flatMap((record) => record.parts || [])]
+    : existing?.parts || [];
+  await applyPartUsage(partsBefore, partsUsed);
 
   const photoSaveError = await saveServicePhotos(state.id, serviceId, values.photos, {
     hadCount: existingPhotos.length,
@@ -1844,6 +2141,17 @@ async function openCompletedServiceForm(state, existing, odometerMiles, { comple
     await deleteDoc(doc(db, "vehicles", state.id, "services", record.id));
   }
 
+  // A combined-away record is absorbed whole, not judged item by item -- its
+  // parts and photos already moved onto this record above, so removing it here
+  // must not touch the shelf again, only clear what it leaves behind: its own
+  // photo subcollection and the document itself.
+  if (combining) {
+    for (const record of combining) {
+      await deleteServicePhotos(state.id, record.id);
+      await deleteDoc(doc(db, "vehicles", state.id, "services", record.id));
+    }
+  }
+
   // A repeat interval schedules the next one straight away, which is the whole
   // point of recording "every 5,000 miles" -- otherwise it lives in your head.
   if (repeatMiles || repeatMonths) {
@@ -1862,6 +2170,8 @@ async function openCompletedServiceForm(state, existing, odometerMiles, { comple
       createdAt: serverTimestamp(),
     });
     showToast("Logged — next one scheduled");
+  } else if (combining) {
+    showToast(`Combined ${combining.length + 1} records into one visit`);
   } else if (folding) {
     showToast(`Logged ${items.length} job${items.length === 1 ? "" : "s"} as one visit`);
   } else {
