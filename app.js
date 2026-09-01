@@ -750,9 +750,9 @@ function renderComingUp(state) {
         shortages.length
           ? shortages
               .map(
-                (need) => `<div class="shopping-row">
+                (need) => `<div class="shopping-row${need.negative ? " negative" : ""}">
                   <span>${escapeHtml(need.name)}</span>
-                  <span class="shopping-need">${shoppingNeedText(need)}</span>
+                  <span class="shopping-need${need.negative ? " negative" : ""}">${shoppingNeedText(need)}</span>
                   ${
                     shoppingDetail(need)
                       ? `<span class="shopping-detail">${escapeHtml(shoppingDetail(need))}</span>`
@@ -817,8 +817,13 @@ function renderComingUp(state) {
 
 // What to buy, and how many -- once there's a floor to count up to. With
 // none set, "low" only ever means "run out", so there's nothing to suggest
-// beyond that.
+// beyond that. Negative gets its own wording: the count itself is wrong, not
+// just thin, so it reads as a discrepancy rather than a restocking figure.
 function shoppingNeedText(need) {
+  if (need.negative) {
+    const keep = need.floor === null ? "" : `, keep ${need.floor}+`;
+    return `${need.short} ${escapeHtml(need.unit)} short of zero · have ${need.quantity}${keep} — worth a recount`;
+  }
   if (need.floor === null) return `have ${need.quantity} — worth restocking`;
   return `${need.short} ${escapeHtml(need.unit)} short · have ${need.quantity}, keep ${need.floor}+`;
 }

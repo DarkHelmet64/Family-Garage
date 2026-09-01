@@ -654,9 +654,11 @@ says which one to buy and where:
 
 With no level set for a part, only actually running out counts, and the line
 says so rather than suggesting a figure nobody gave. A count gone negative —
-more booked out than the shelf held — reads as short of zero, the same
-discrepancy [the shelf page](#parts-and-supplies) already flags for a
-recount.
+more booked out than the shelf held — is a different kind of problem than
+merely running low: the count itself is wrong, not just thin. That line reads
+as short of zero rather than short of a level, turns red the same way [the
+shelf page](#parts-and-supplies) already flags it for a recount, and sorts
+to the top of the list ahead of everything else, however short that is.
 
 **To buy** doesn't care what any job is due for, or when — a part reserved
 for something eight months out counts exactly the same as one for tomorrow,
