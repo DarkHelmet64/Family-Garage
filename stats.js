@@ -438,6 +438,55 @@ export function scheduleRows(schedule, services, { odometerMiles = null, today =
 }
 
 // ---------------------------------------------------------------------------
+// Every job name in use across the garage
+//
+// The same job ends up typed a few different ways over the years -- "Oil chg",
+// "oil change", "Oil Change" -- each one a distinct string to everything that
+// matches on it: the schedule deciding what's already booked, the suggestion
+// list, the badge on the garage card. This is the other side of that: one row
+// per name (grouped the same case-and-spacing-insensitive way scheduling
+// already does), so a rename can fix it everywhere at once.
+// ---------------------------------------------------------------------------
+
+// One row per distinct job name across every vehicle's schedule and service
+// records: the casing seen most often (that's what a rename starts from), how
+// many vehicles carry it, and how many records.
+export function serviceNameReport(vehicles) {
+  const byKey = new Map();
+
+  const seen = (title, vehicleId) => {
+    const raw = String(title || "").trim();
+    if (!raw) return;
+    const key = normalizeJob(raw);
+    const entry = byKey.get(key) || { key, casing: new Map(), vehicleIds: new Set(), records: 0 };
+    entry.casing.set(raw, (entry.casing.get(raw) || 0) + 1);
+    entry.vehicleIds.add(vehicleId);
+    entry.records += 1;
+    byKey.set(key, entry);
+  };
+
+  for (const vehicle of vehicles) {
+    for (const entry of vehicle.schedule || []) seen(entry.title, vehicle.id);
+    for (const record of vehicle.services || []) {
+      if (record.status === "done") {
+        for (const item of serviceItems(record)) seen(item.title, vehicle.id);
+      } else {
+        seen(record.title, vehicle.id);
+      }
+    }
+  }
+
+  return [...byKey.values()]
+    .map((entry) => ({
+      key: entry.key,
+      name: [...entry.casing.entries()].sort((a, b) => b[1] - a[1])[0][0],
+      vehicles: entry.vehicleIds.size,
+      records: entry.records,
+    }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+// ---------------------------------------------------------------------------
 // What's coming up
 //
 // Two kinds of work land on a calendar: jobs actually booked in, and jobs a

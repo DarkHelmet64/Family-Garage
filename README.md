@@ -344,6 +344,28 @@ Renaming a line rather than removing it leaves its job on the list too — match
 is by name, and the app would rather leave something behind than delete the wrong
 thing.
 
+#### Combining past visits
+
+Sometimes two records really were one trip — an oil change and a tire rotation
+logged as separate visits when they happened at the same shop on the same day.
+**Combine**, on the Service history heading, turns any picked pair (or more)
+into a single record.
+
+Tap **Combine**, check the ones that belong together, and tap the button that
+appears once you've picked at least two. The sheet opens with everything already
+in it — a line per job, their costs, their parts, their receipt photos — as if
+you'd logged them together in the first place. The date and odometer default to
+the **earliest** of the visits you picked, on the theory that's the one the
+others actually happened alongside; change either if that's not right.
+
+Save, and the records you picked collapse into the one you're looking at — the
+others are deleted, their parts and photos already moved across, nothing taken
+off the shelf a second time for parts that were already booked out when each
+visit was first logged. Unlike folding open jobs into a visit, there's no
+partial-match safety valve here: picking the records is already the deliberate
+step, so editing a line before you save changes what it says, not whether its
+source record gets combined in.
+
 Open services are sorted with the most pressing first and color-coded: red for
 **overdue** (the date has passed, or you've driven past the mileage), amber for
 **due soon** (within 30 days or 500 miles), plain for everything further out.
@@ -605,6 +627,30 @@ Working this out needs every vehicle's schedule, services and fill-ups, which
 the vehicle list itself doesn't — so it's read after the list has been asked
 for, and the list appears without waiting on it. It's read once when the page
 opens rather than watched live; coming back to the garage reads it again.
+
+## Service names
+
+The same job ends up typed a few different ways over the years — "Oil chg",
+"oil change", "Oil Change" — and everything that matches on a job's name (the
+schedule deciding what's already booked, the suggestion list, the badge on the
+garage card) treats each spelling as a different job.
+
+**More > 🏷️ Service names** is a register of every name in use across the whole
+garage, with how many vehicles and how many records carry each — grouped the
+same case-and-spacing-insensitive way scheduling already decides two jobs are
+the same one, so "Oil chg" and "oil CHANGE" show up as one row, not two.
+
+Tap a name to rename it, and it changes **everywhere**: every schedule entry
+that names it, every booked job, every item on a past visit, and which job a
+booked part was for — on every vehicle, not just one. Typing back the name
+already showing still does something useful: it normalizes any stray-cased
+variant to that exact spelling.
+
+Renaming to a name that's already in use merges the two — if "Oil Chg" and "Oil
+change" were really the same job typed two ways, renaming one to the other
+folds them into a single row here. It doesn't merge *records* on any one
+vehicle, though — two records with the same name on the same vehicle after a
+rename are exactly what they were before, just agreeing on what to call it.
 
 ## Security note
 
