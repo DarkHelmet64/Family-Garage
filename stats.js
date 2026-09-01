@@ -329,6 +329,36 @@ export function isLowStock(part) {
   return quantity <= floor;
 }
 
+// The cabinet's own shopping list: every part sitting at or below what you
+// said to keep on hand, and how many to buy to get back there. Parts are
+// reserved off the shelf the moment they're assigned to a job -- see
+// applyPartUsage's call sites -- so the shelf's own count already is the
+// answer; nothing here needs to know what any job is due for or when.
+export function shelfShortages(parts) {
+  return (parts || [])
+    .filter(isLowStock)
+    .map((part) => {
+      const quantity = Number(part.quantity) || 0;
+      const hasFloor = part.minQuantity != null;
+      const floor = hasFloor ? Number(part.minQuantity) : 0;
+      return {
+        partId: part.id,
+        name: part.name,
+        unit: part.unit || "each",
+        quantity,
+        // Nobody said how many to keep on hand, so there's nothing to count
+        // up to beyond zero -- short only has a real number once a floor's
+        // been set.
+        floor: hasFloor ? floor : null,
+        short: hasFloor ? Math.max(0, floor - quantity) : Math.max(0, -quantity),
+        modelNumber: part.modelNumber || null,
+        size: part.size || null,
+        vendor: part.vendor || null,
+      };
+    })
+    .sort((a, b) => b.short - a.short || String(a.name).localeCompare(String(b.name)));
+}
+
 // ---------------------------------------------------------------------------
 // The service schedule
 //
@@ -381,24 +411,6 @@ export function lastDoneFor(title, services) {
     }
     return String(a.servicedOn || "").localeCompare(String(b.servicedOn || ""));
   })[matches.length - 1];
-}
-
-// What a job actually needs off the shelf: its schedule entry's parts list
-// when that entry actually has one set, since the schedule entry is the one
-// place that's meant to be edited -- a booked or done record's own copy is
-// only ever a snapshot made the moment it was added to the list, and goes
-// stale the moment the schedule entry changes after that. But a schedule
-// entry that's never had parts configured -- most jobs, on most schedules --
-// isn't a deliberate "needs nothing" that should blank out a record that
-// genuinely has its own list, so the record's own parts still stand until
-// the schedule entry actually says otherwise. A job with no matching
-// schedule entry at all (an ad-hoc one-off) has nowhere else to defer to
-// either, so it also goes by what it noted for itself.
-export function partsNeededFor(service, schedule) {
-  const wanted = normalizeJob(service.title);
-  const scheduled = (schedule || []).find((entry) => normalizeJob(entry.title) === wanted);
-  if (scheduled?.partsNeeded?.length) return scheduled.partsNeeded;
-  return service.partsNeeded || [];
 }
 
 // What stands in for a job that has never been logged: the vehicle as it left
@@ -566,7 +578,6 @@ export function upcomingWork(vehicles, { today = new Date() } = {}) {
         title: service.title,
         dueOn: service.dueOn || null,
         dueOdometerMiles: service.dueOdometerMiles ?? null,
-        partsNeeded: partsNeededFor(service, vehicle.schedule),
       });
     }
 
@@ -587,9 +598,6 @@ export function upcomingWork(vehicles, { today = new Date() } = {}) {
         title: entry.title,
         dueOn: entry.dueOn || null,
         dueOdometerMiles: entry.dueOdometerMiles ?? null,
-        // A schedule entry can name what it needs now, same as a booked job --
-        // so the buy list already knows before anyone's tapped Add to list.
-        partsNeeded: entry.partsNeeded || [],
         neverDone: entry.neverDone,
         countedFrom: entry.countedFrom || null,
       });
@@ -646,47 +654,3 @@ export function upcomingWork(vehicles, { today = new Date() } = {}) {
   return { overdue, soon };
 }
 
-// Everything the coming work asks for, against what's on the shelf.
-export function partsForecast(rows, parts) {
-  const wanted = new Map();
-  for (const row of rows) {
-    for (const need of row.partsNeeded || []) {
-      const current = wanted.get(need.partId) || {
-        partId: need.partId,
-        name: need.name,
-        unit: need.unit,
-        quantity: 0,
-        modelNumber: null,
-        size: null,
-        vendor: null,
-      };
-      current.quantity += Number(need.quantity) || 0;
-      // Whatever any of the jobs happened to note, in case the part has since
-      // left the shelf and there's nothing else to go on.
-      current.modelNumber = current.modelNumber || need.modelNumber || null;
-      current.size = current.size || need.size || null;
-      current.vendor = current.vendor || need.vendor || null;
-      wanted.set(need.partId, current);
-    }
-  }
-
-  return [...wanted.values()]
-    .map((need) => {
-      const part = parts.find((candidate) => candidate.id === need.partId);
-      const have = part ? Number(part.quantity) || 0 : 0;
-      return {
-        ...need,
-        have,
-        short: Math.max(0, need.quantity - have),
-        unit: need.unit || (part && part.unit) || "each",
-        // Which one to buy, taken from the shelf rather than from what the job
-        // recorded: standing in the aisle you want what the shelf says today,
-        // and a job booked before any of this was kept has none of it. What the
-        // job noted stands in only if the part has since left the shelf.
-        modelNumber: (part && part.modelNumber) || need.modelNumber || null,
-        size: (part && part.size) || need.size || null,
-        vendor: (part && part.vendor) || need.vendor || null,
-      };
-    })
-    .sort((a, b) => b.short - a.short || String(a.name).localeCompare(String(b.name)));
-}

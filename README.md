@@ -369,6 +369,14 @@ partial-match safety valve here: picking the records is already the deliberate
 step, so editing a line before you save changes what it says, not whether its
 source record gets combined in.
 
+#### Logging a visit directly
+
+**+ Add**, next to **Combine** on the Service history heading, opens the
+same sheet **🔧 Add service > ✅ Log service already done** does — for a
+visit you already know happened, entered straight into history without
+going by way of the top of the page. **One trip, several jobs** works here
+too: add a line for each, the same as anywhere else a visit gets logged.
+
 Open services are sorted with the most pressing first and color-coded: red for
 **overdue** (the date has passed, or you've driven past the mileage), amber for
 **due soon** (within 30 days or 500 miles), plain for everything further out.
@@ -409,18 +417,13 @@ and every date recalculates on the spot.
 
 An entry can also say **what it needs off the shelf** — the same "Parts
 needed" picker as everywhere else, set on the entry itself rather than typed in
-fresh each time it comes round. Set it once on "Oil change" and every future
-**Add to list** for that job carries it straight onto the booked record — no
-prompt, no extra tap, nothing to remember when you're standing at the shelf
-doing the work. Nothing leaves the shelf at that point; a part is only ever
-actually taken off the shelf once the job is marked done, whenever that ends up
-being.
-
-That copy is only a starting point, not the last word — the schedule entry
-keeps deciding what the job needs even after it's booked. Change the parts on
-"Oil change" next month and an already-booked oil change follows along
-everywhere it's shown, right up through what **Mark done** pre-fills, with
-nothing to re-book or re-enter by hand.
+fresh each time it comes round. This is only ever a default: set it once on
+"Oil change" and every future **Add to list** for that job carries it straight
+onto the booked record — no prompt, no extra tap, nothing to remember when
+you're standing at the shelf doing the work. The entry itself never touches
+the shelf; it's the booked job's own copy, made the moment it's added to the
+list, that actually reserves the parts. See [Parts and
+supplies](#parts-and-supplies) for what that means and when it happens.
 
 ### A job you've never logged
 
@@ -456,8 +459,9 @@ round, and the service list is what you've actually committed to. You decide
 what you're doing on Saturday, not the interval, so every job can be added; only
 the pressing ones get the green button. A row already on the list says so
 instead of offering to add a second copy. It's one tap, no questions asked —
-whatever the row already needs off the shelf comes with it; see [the service
-schedule](#the-service-schedule) for where that's set.
+whatever the row already needs off the shelf comes with it, reserved from the
+shelf the moment you tap; see [the service schedule](#the-service-schedule)
+for where that's set.
 
 Once there's more than one job waiting, the Service section on the vehicle page
 offers **Log as one visit** on its Service heading — see [One visit, several
@@ -517,6 +521,14 @@ and **−** for a quick recount. Brands, categories and vendors you've already
 typed are offered back as you type, so "Fram" doesn't become "fram" on the next
 row.
 
+It works like an actual cabinet, not a running tally kept off to the side:
+pick a part for a job anywhere — one you're scheduling, one already booked, or
+one you're marking done — and it comes off the shelf right then, the same as
+if you'd walked over and set it aside for that job. What the shelf says is
+always what's actually still there, spoken for or not, and [the buy
+list](#whats-coming-up) is read straight off that number rather than worked
+out from what any job says it'll need someday.
+
 Give things categories and the shelf sorts itself into them, named categories
 first and anything without one at the end. Categorise nothing and it stays the
 one flat list it always was.
@@ -539,13 +551,16 @@ quietly change what the record says was used.
 
 ### Using parts on a service
 
-The completed-service sheet has **Parts used**: pick an item and how many. What
-you take comes off the shelf when the record saves, and the option text shows
-what's there, with a warning under any row asking for more than there is.
+Every parts picker in the app — scheduling a job, editing one already booked,
+or the completed-service sheet's **Parts used** — works the same way: pick an
+item and how many, and it comes off the shelf the moment you save, not later.
+The option text shows what's there, with a warning under any row asking for
+more than there is.
 
 Edits move the shelf by the *difference*, not by the whole amount again — change
-5 quarts to 6 and one more quart comes off. Deleting a record puts everything it
-used back. Quantities change by an atomic increment rather than by writing a
+5 quarts to 6 and one more quart comes off; change it back down and that quart
+returns. Deleting a job, booked or already done, puts back whatever it had
+reserved. Quantities change by an atomic increment rather than by writing a
 number worked out a moment earlier, so two phones logging service at once can't
 undo each other's arithmetic.
 
@@ -590,13 +605,23 @@ take it off the list entirely, and the record still says what was actually used
 and where it came from. Parts with no model or vendor recorded read exactly as
 they always did, and so do records written before any of this existed.
 
-### Saying what a scheduled job needs
+### Booking a job's parts ahead of time
 
-The scheduled-service sheet has **Parts needed**, which is the same picker
-without the subtraction: nothing leaves the shelf until the job is marked done.
-The job then shows what it needs in the service list, in amber when the shelf
-can't cover it, and **Mark done** starts from that list so the parts come across
-with one tap.
+The scheduled-service sheet has **Parts needed** too — the same picker, the
+same behavior: pick what the job will take, and it's reserved off the shelf
+the moment you save, same as marking something done. The job then shows what
+it's reserved in the service list, in amber if the shelf is now running low
+on any of it, and **Mark done** starts from that same list, since it's
+already been taken off the shelf — change what's actually used there and only
+the difference moves either way.
+
+A [schedule entry](#the-service-schedule) — the recurring rule itself, not a
+booked job — can carry its own **Parts needed** too, but that one's only ever
+a default. It never touches the shelf on its own; it copies onto a job's own
+list the moment **Add to list** books it. Change the parts on the entry
+afterwards and it's the default for the *next* time that job comes round — a
+job already booked keeps whatever it already reserved, unless you open that
+job itself and change its own list.
 
 ## What's coming up
 
@@ -631,51 +656,31 @@ whichever falls first. To decide it, a job due on mileage is still turned into a
 date using how fast that vehicle has actually been driven; only miles still to
 drive can be dated that way, so a job you're already past is simply overdue.
 
-At the top is **To buy** — everything this work needs, added up across jobs and
-set against the shelf, so a Saturday oil change doesn't stall on a filter nobody
-bought. Each line says which one to buy and where:
+At the top is **To buy** — a straight read of the shelf: everything at or
+below the level you said to keep, whatever it took to get there. Each line
+says which one to buy and where:
 
-> **0W-20 oil** — **2 qt short** · need 5, have 3
+> **0W-20 oil** — **2 qt short** · have 3, keep 5+
 > *model M1-0W20 · 0W-20 · from NAPA*
 
-Those come off the shelf entry as it stands today, not off the job that asked
-for them — in the aisle you want what the shelf says now, and a job booked
-before any of that was recorded has none of it. What the job noted is used only
-if the part has since left the shelf entirely.
+With no level set for a part, only actually running out counts, and the line
+says so rather than suggesting a figure nobody gave. A count gone negative —
+more booked out than the shelf held — reads as short of zero, the same
+discrepancy [the shelf page](#parts-and-supplies) already flags for a
+recount.
 
-**To buy** is always on screen while something's overdue or due soon, in one of
-three states: what's short, "everything these jobs need is on the shelf" once
-none of it is, or — if not one of the pressing jobs has a parts list at all — a
-line saying so, rather than the card just not appearing. That third state is
-worth knowing on its own: a job carries no parts list until something has said
-what it needs — [a schedule entry](#the-service-schedule), or a job booked in
-by hand.
+**To buy** doesn't care what any job is due for, or when — a part reserved
+for something eight months out counts exactly the same as one for tomorrow,
+because [reserving it already took it off the
+shelf](#parts-and-supplies). It shows whenever there's a shelf to speak of,
+in one of two states: what's short, or "everything on the shelf is at or
+above what you keep on hand" once nothing is. With no parts tracked on the
+shelf at all, it doesn't appear — there's nothing yet to check.
 
-**To buy** reads that straight off the schedule entry when it actually has one
-set, not off whatever's booked — before anyone's tapped **Add to list**, and
-after. Booking a job copies its schedule entry's parts list over so the
-record itself is never empty, but the schedule entry keeps being the one
-that counts: edit it later — say, once you find out the filter's a different
-size — and the buy list follows, even for a job that's already on the list,
-with nothing to re-book. A schedule entry that's simply never had parts set
-isn't treated as a deliberate "needs nothing", though — most jobs on most
-schedules haven't — so a booked job that has its own list, whether typed in
-by hand or copied over before the schedule entry lost it some other way,
-keeps using that until the schedule entry actually says something different.
-A job with no matching schedule entry at all — the one-off, added by hand —
-has nowhere else to defer to either, so it goes by whatever it noted for
-itself the same way.
-
-That same rule reaches past the buy list: the vehicle page's own **Needs**
-line on a booked job, what **Mark done** pre-fills into parts used, and what
-**Log as one visit** adds up across every job it's folding together — all
-resolve through the schedule entry the same way. Edit a schedule entry's
-parts and every one of those follows on the spot, not just the garage-level
-total.
-
-Working this out needs every vehicle's schedule, services and fill-ups, which
-the vehicle list itself doesn't — so it's read after the list has been asked
-for, and the list appears without waiting on it. It's read once when the page
+Working out **Coming up**'s own job list needs every vehicle's schedule,
+services and fill-ups, which the vehicle list itself doesn't — so both it and
+**To buy** are read together, after the vehicle list has already been asked
+for, and the list appears without waiting on either. Read once when the page
 opens rather than watched live; coming back to the garage reads it again.
 
 ## Service names

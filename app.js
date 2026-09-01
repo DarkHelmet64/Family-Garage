@@ -50,10 +50,9 @@ import {
   scheduleRows,
   normalizeJob,
   lastDoneFor,
-  partsNeededFor,
   isLowStock,
   upcomingWork,
-  partsForecast,
+  shelfShortages,
   serviceNameReport,
   STATS_VERSION,
 } from "./stats.js";
@@ -621,8 +620,11 @@ async function renameServiceEverywhere(vehicles, oldName, newName) {
 //
 // The part of the dashboard that looks across the whole garage: everything due
 // in the next six months or year, whether it was booked in or is simply what a
-// vehicle's schedule implies next -- and what it all needs off the shelf, so a
-// Saturday job doesn't stall on a part nobody bought.
+// vehicle's schedule implies next -- plus a straight read of the shelf itself,
+// so a Saturday job doesn't stall on a part nobody bought. The two are
+// independent: a part comes off the shelf the moment it's assigned to any
+// job, so the buy list doesn't need to know what's due or when -- see
+// shelfShortages.
 //
 // It's the one thing on this screen that can't be answered from the vehicle
 // documents alone -- it needs every vehicle's schedule, services and fill-ups --
@@ -648,8 +650,20 @@ function mountComingUp() {
   });
 
   loadGarage()
-    .then((loaded) => {
+    .then(async (loaded) => {
       Object.assign(state, loaded, { loaded: true });
+      // Catches up anything booked before parts started reserving at
+      // assignment time -- see migratePartsReservations. Only ever touches a
+      // record once, so this is cheap and harmless on every visit after the
+      // first too.
+      const touched = await migratePartsReservations(loaded.vehicles).catch((err) => {
+        console.warn("Couldn't sweep existing parts reservations", err);
+        return 0;
+      });
+      if (touched) {
+        const partSnap = await getDocs(collection(db, "parts"));
+        state.parts = partSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      }
       renderComingUp(state);
     })
     .catch((err) => {
@@ -658,6 +672,32 @@ function mountComingUp() {
       document.getElementById("coming-up-body").innerHTML =
         `<p class="empty small">Couldn't work out what's coming up.<br /><span class="hint">${escapeHtml(err.message)}</span></p>`;
     });
+}
+
+// One-time catch-up for records booked before parts started reserving off
+// the shelf the moment they're assigned, rather than only once a job is
+// marked done: anything still open with a parts list that's never actually
+// been charged to the shelf gets swept in here. Marking each record as it's
+// swept -- `reserved: true`, the same flag every other write already sets --
+// is what makes this safe to run on every load rather than needing some
+// separate "has this already happened" flag of its own: a record already
+// marked simply has nothing left for this to do, so a second pass (or a
+// second device running it at the same moment) costs a few reads and writes
+// nothing.
+async function migratePartsReservations(vehicles) {
+  let touched = 0;
+  for (const vehicle of vehicles) {
+    for (const service of vehicle.services || []) {
+      if (service.status === "done" || service.reserved) continue;
+      const needed = service.partsNeeded || [];
+      await updateDoc(doc(db, "vehicles", vehicle.id, "services", service.id), { reserved: true });
+      if (needed.length) {
+        await applyPartUsage([], needed);
+        touched += 1;
+      }
+    }
+  }
+  return touched;
 }
 
 // Everything the coming-up section needs, in one pass.
@@ -696,13 +736,41 @@ function renderComingUp(state) {
 
   const today = new Date();
   const { overdue, soon } = upcomingWork(state.vehicles, { today });
-  // The shopping list covers what you're late for as well as what's nearly due
-  // -- an overdue oil change needs its oil just as much.
-  const forecast = partsForecast([...overdue, ...soon], state.parts);
-  const shortages = forecast.filter((need) => need.short > 0);
+
+  // A straight read of the shelf, not the jobs -- a part comes off it the
+  // moment it's assigned to any job, so what's left already accounts for
+  // everything already spoken for, whether that job is due today or next
+  // year. Nothing to check once there's no shelf to speak of.
+  const shortages = state.parts.length ? shelfShortages(state.parts) : [];
+  const buyCard = state.parts.length
+    ? `
+    <div class="card shopping">
+      <div class="section-title">To buy</div>
+      ${
+        shortages.length
+          ? shortages
+              .map(
+                (need) => `<div class="shopping-row">
+                  <span>${escapeHtml(need.name)}</span>
+                  <span class="shopping-need">${shoppingNeedText(need)}</span>
+                  ${
+                    shoppingDetail(need)
+                      ? `<span class="shopping-detail">${escapeHtml(shoppingDetail(need))}</span>`
+                      : ""
+                  }
+                </div>`
+              )
+              .join("")
+          : `<p class="hint ok-line">Everything on the shelf is at or above what you keep on hand.</p>`
+      }
+    </div>
+  `
+    : "";
 
   if (!overdue.length && !soon.length) {
-    bodyEl.innerHTML = `<p class="empty small">Nothing overdue or due soon. Anything further out is on
+    bodyEl.innerHTML =
+      buyCard +
+      `<p class="empty small">Nothing overdue or due soon. Anything further out is on
       each vehicle's own page.</p>`;
     return;
   }
@@ -741,35 +809,18 @@ function renderComingUp(state) {
       .filter(Boolean)
       .join(" · ")}. Tap a count to see the jobs; open a vehicle for their dates and mileages.</p>
 
-    <div class="card shopping">
-      <div class="section-title">To buy</div>
-      ${
-        shortages.length
-          ? shortages
-              .map(
-                (need) => `<div class="shopping-row">
-                  <span>${escapeHtml(need.name)}</span>
-                  <span class="shopping-need">${need.short} ${escapeHtml(need.unit)} short<span class="muted"> · need ${need.quantity}, have ${need.have}</span></span>
-                  ${
-                    shoppingDetail(need)
-                      ? `<span class="shopping-detail">${escapeHtml(shoppingDetail(need))}</span>`
-                      : ""
-                  }
-                </div>`
-              )
-              .join("")
-          : forecast.length
-            ? `<p class="hint ok-line">Everything these jobs need is on the shelf.</p>`
-            : `<p class="hint">None of these jobs have parts listed yet. A job merely due
-               on the schedule doesn't carry a parts list of its own — <strong>Add to
-               list</strong> it from the vehicle's Service schedule and note what it
-               needs, or add a list to a job you've already booked, and it'll show up
-               here.</p>`
-      }
-    </div>
+    ${buyCard}
 
     <div class="plan-vehicles">${sections}</div>
   `;
+}
+
+// What to buy, and how many -- once there's a floor to count up to. With
+// none set, "low" only ever means "run out", so there's nothing to suggest
+// beyond that.
+function shoppingNeedText(need) {
+  if (need.floor === null) return `have ${need.quantity} — worth restocking`;
+  return `${need.short} ${escapeHtml(need.unit)} short · have ${need.quantity}, keep ${need.floor}+`;
 }
 
 // A count you can open. Closed it answers "how bad is it" in one line; opened
@@ -1285,6 +1336,19 @@ function renderVehicleView(id) {
     state.services = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
     repairDerivedTitles(id, state.services);
     render();
+    // Catches up this vehicle if it's opened directly (a QR code, a bookmark)
+    // without ever passing through the garage screen, where this otherwise
+    // runs first. Guarded so a page left open a while doesn't re-sweep on
+    // every services update -- migratePartsReservations is itself safe to
+    // call again, but there's no reason to. Any shelf change it makes
+    // reaches this page through the parts listener already running below,
+    // same as any other live update while the page is open.
+    if (!state.swept) {
+      state.swept = true;
+      migratePartsReservations([{ id, services: state.services }]).catch((err) =>
+        console.warn("Couldn't sweep existing parts reservations", err)
+      );
+    }
   });
 
   onSnapshot(
@@ -1303,11 +1367,9 @@ function renderVehicleView(id) {
     collection(db, "vehicles", id, "schedule"),
     (snap) => {
       state.schedule = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-      // Suggestions aside, a booked job's "Needs" line is resolved through
-      // its schedule entry now (see partsNeededFor), so this has to redraw
-      // too -- not just sit there until some other listener happens to.
-      render();
     },
+    // The schedule is a nicety here; if it can't be read, the suggestions are
+    // just a little shorter.
     (err) => console.warn("Couldn't read the service schedule", err)
   );
 }
@@ -1316,7 +1378,7 @@ function vehicleBodyHtml(state) {
   const { vehicle } = state;
   const { entries, summary } = computeFuelStats(state.fillups);
   const odometerMiles = currentOdometer(vehicle, state.fillups, state.services);
-  const ctx = { odometerMiles, today: new Date(), parts: state.parts || [], schedule: state.schedule || [] };
+  const ctx = { odometerMiles, today: new Date(), parts: state.parts || [] };
 
   const open = openServices(state.services, ctx);
   const history = state.services
@@ -1389,6 +1451,7 @@ function vehicleBodyHtml(state) {
                    ? `<button class="secondary small" data-act="${state.combineMode ? "cancel-combine" : "start-combine"}">${state.combineMode ? "Cancel" : "Combine"}</button>`
                    : ""
                }
+               <button class="secondary small" data-act="add-history">+ Add</button>
                <button class="secondary small" data-act="toggle-history">${state.showHistory ? "Hide" : `Show (${history.length})`}</button>
              </div>
            </div>
@@ -1490,7 +1553,7 @@ function serviceRowHtml(service, ctx) {
         <span class="row-meta">${escapeHtml(dueSummary(service, ctx.odometerMiles))}</span>
         ${service.shop ? `<span class="row-meta">${escapeHtml(service.shop)}</span>` : ""}
         ${service.notes ? `<span class="row-note">${escapeHtml(service.notes)}</span>` : ""}
-        ${partsNeededHtml(service, ctx.parts, ctx.schedule)}
+        ${partsNeededHtml(service, ctx.parts)}
         ${photoTagHtml(service)}
       </div>
       <div class="row-side">
@@ -1595,19 +1658,17 @@ const partsSummary = (parts) =>
     })
     .join(", ");
 
-// What a booked job still needs off the shelf, and whether it's there. Being
-// short is the thing worth knowing before the day arrives. `schedule`, when
-// given, resolves through partsNeededFor so this agrees with the buy list and
-// Mark done rather than showing whatever's frozen on the record itself; the
-// schedule page's own rows already pass their entry directly and need no
-// resolving.
-function partsNeededHtml(service, parts = [], schedule = null) {
-  const needed = schedule ? partsNeededFor(service, schedule) : service.partsNeeded || [];
+// What a job has reserved off the shelf. Since assigning it already took it
+// off, "short" now means the shelf itself is running low on that part -- the
+// same check the shelf page and the buy list use -- not whether there was
+// enough for this one job in isolation.
+function partsNeededHtml(service, parts = []) {
+  const needed = service.partsNeeded || [];
   if (!needed.length) return "";
 
   const short = needed.filter((want) => {
     const part = parts.find((candidate) => candidate.id === want.partId);
-    return part && (Number(part.quantity) || 0) < Number(want.quantity || 0);
+    return part && isLowStock(part);
   });
 
   return `<span class="row-meta parts-line${short.length ? " short" : ""}">Needs ${escapeHtml(partsSummary(needed))}${
@@ -1731,6 +1792,11 @@ function handleVehicleAction(action, id, state) {
     // on doesn't need to be asked whether it's already been done.
     case "add-service":
       return openScheduleServiceForm(state, null, odometerMiles);
+    // Same sheet "✅ Log service already done" opens, reached directly from
+    // the history it's about to join -- no need to go back up to the menu at
+    // the top of the page for something already logged and paid for.
+    case "add-history":
+      return openCompletedServiceForm(state, null, odometerMiles);
     case "log-visit":
       return openCompletedServiceForm(state, null, odometerMiles, {
         folding: openServices(state.services, { odometerMiles, today: new Date(), parts: state.parts || [] }),
@@ -2013,9 +2079,10 @@ function openAddServiceMenu(state, odometerMiles) {
 // a whole visit's worth (inspection, wipers, cabin filter, all due at once)
 // can be booked in one pass, sharing the date, mileage, shop, parts and notes
 // below. Parts entered here land on the first job listed, not every one of
-// them -- the buy list adds a job's partsNeeded across every pressing row, so
-// putting the same list on several new jobs would count each part several
-// times over. Add parts to any other job afterward by editing it on its own.
+// them -- one shared field, one reservation off the shelf; putting the same
+// list on several new jobs would take it off the shelf several times over for
+// what's really one intended pick. Add parts to any other job afterward by
+// editing it on its own.
 async function openScheduleServiceForm(state, existing, odometerMiles) {
   const values = await openFormModal({
     title: existing ? "Edit scheduled service" : "Schedule service",
@@ -2069,8 +2136,8 @@ async function openScheduleServiceForm(state, existing, odometerMiles) {
         catalogue: state.parts || [],
         vehicleId: state.id,
         hint: existing
-          ? "Nothing leaves the shelf until the job is marked done — this is so you know what to have in."
-          : "Nothing leaves the shelf until the job is marked done. Adding more than one job above? This applies to the first one listed.",
+          ? "Taken off the shelf as soon as you save this — put it back by clearing the part here or deleting the job."
+          : "Taken off the shelf as soon as you save this. Adding more than one job above? This applies to the first one listed.",
       },
       { name: "notes", label: "Notes (optional)", type: "textarea", value: existing?.notes || "" },
     ],
@@ -2099,11 +2166,20 @@ async function openScheduleServiceForm(state, existing, odometerMiles) {
   };
 
   if (existing) {
+    const partsNeeded = values.partsNeeded || [];
+    // Reserving more takes the difference off the shelf; reserving less puts
+    // it back -- the same delta the shelf would move if you'd counted the
+    // parts out by hand. A record that's never actually been charged yet
+    // (from before this reserved at assignment time) starts from nothing, so
+    // touching it here is also what finally reserves it.
+    const before = currentlyReserved(existing);
     await updateDoc(doc(db, "vehicles", state.id, "services", existing.id), {
       ...shared,
       title: values.title,
-      partsNeeded: values.partsNeeded || [],
+      partsNeeded,
+      reserved: true,
     });
+    await applyPartUsage(before, partsNeeded);
     showToast("Service updated");
   } else {
     const titles = (values.titles || []).map((item) => item.title).filter(Boolean);
@@ -2113,6 +2189,7 @@ async function openScheduleServiceForm(state, existing, odometerMiles) {
           ...shared,
           title,
           partsNeeded: index === 0 ? values.partsNeeded || [] : [],
+          reserved: true,
           servicedOn: null,
           odometerMiles: null,
           costCents: null,
@@ -2123,6 +2200,7 @@ async function openScheduleServiceForm(state, existing, odometerMiles) {
         })
       )
     );
+    await applyPartUsage([], values.partsNeeded || []);
     showToast(titles.length > 1 ? `${titles.length} services scheduled` : "Service scheduled");
   }
   await recomputeSummary(state.id);
@@ -2217,22 +2295,23 @@ async function openCompletedServiceForm(state, existing, odometerMiles, { comple
         name: "partsUsed",
         label: "Parts used (optional)",
         type: "parts",
-        // Marking a scheduled job done starts from what it currently needs --
-        // its schedule entry's list if one matches, not a stale copy frozen
-        // on the record since it was booked; a whole visit starts from what
-        // all of its jobs need, added up the same way.
+        // Marking a scheduled job done starts from what's already reserved
+        // for it -- taken off the shelf back when the job was booked, not a
+        // second trip to the shelf now; a whole visit starts from what all of
+        // its jobs had reserved, added up the same way. Change the picked
+        // parts here and only the difference moves, in either direction.
         value: combining
           ? [...(existing?.parts || []), ...combining.flatMap((record) => record.parts || [])]
           : existing?.parts ||
-            (completing && existing ? partsNeededFor(existing, state.schedule) : null) ||
-            (folding ? partsNeededAcross(folding, state.schedule) : null) ||
+            (completing && existing ? existing.partsNeeded : null) ||
+            (folding ? partsNeededAcross(folding) : null) ||
             [],
         catalogue: state.parts || [],
         vehicleId: state.id,
         // What the shelf says these cost can be dropped onto one of the jobs
         // above, so the receipt doesn't have to be added up by hand.
         appliesTo: "items",
-        hint: "Anything taken off the shelf comes out of the parts list when this is saved.",
+        hint: "Only the difference from what's already reserved moves when this is saved.",
       },
       {
         name: "photos",
@@ -2320,15 +2399,19 @@ async function openCompletedServiceForm(state, existing, odometerMiles, { comple
     // rather than after saving and reopening it.
     serviceId = (await addDoc(services, { ...payload, createdAt: serverTimestamp() })).id;
   }
-  // What was already booked against this record is given back before the new
-  // list is taken off, so editing a saved visit moves the shelf by the
-  // difference rather than charging it twice. Combining folds in what the
-  // merged-away records had already booked too -- those parts left the shelf
-  // once, when each visit was first logged, and moving them onto this record
-  // isn't a second trip to the shelf.
+  // What was already reserved against this record is given back before the
+  // new list is taken off, so saving moves the shelf by the difference
+  // rather than charging it twice -- a done record's actual usage, or a
+  // still-open one's reservation, whichever this one has. Combining folds in
+  // what the merged-away records had already reserved too -- those parts
+  // left the shelf once, when each visit was first logged, and moving them
+  // onto this record isn't a second trip to the shelf. A brand new record
+  // (folding or a fresh log) has nothing of its own yet; a folded record's
+  // own reservation is released separately below, as each one comes off the
+  // list.
   const partsBefore = combining
     ? [...(existing?.parts || []), ...combining.flatMap((record) => record.parts || [])]
-    : existing?.parts || [];
+    : currentlyReserved(existing);
   await applyPartUsage(partsBefore, partsUsed);
 
   const photoSaveError = await saveServicePhotos(state.id, serviceId, values.photos, {
@@ -2346,7 +2429,10 @@ async function openCompletedServiceForm(state, existing, odometerMiles, { comple
   // record behind rather than guessing, which is the harmless way to be wrong.
   const foldedAway = folding ? folding.filter((record) => saidDone(record, items)) : [];
   for (const record of foldedAway) {
-    await applyPartUsage(record.parts || [], []);
+    // Each one had already reserved its own parts when it was booked --
+    // releasing that here, per record, is what the combined deduction above
+    // is actually being weighed against.
+    await applyPartUsage(currentlyReserved(record), []);
     await deleteServicePhotos(state.id, record.id);
     await deleteDoc(doc(db, "vehicles", state.id, "services", record.id));
   }
@@ -2398,15 +2484,13 @@ function sharedShop(records) {
   return named.length === 1 ? named[0] : "";
 }
 
-// What the whole visit needs off the shelf: every job's parts, added up, so two
-// oil changes on one trip ask for both lots of oil rather than one. Each
-// job's own list is resolved through partsNeededFor first, so a schedule
-// entry edited after its job was booked still wins over the stale copy on
-// the record.
-function partsNeededAcross(records, schedule) {
+// What the whole visit needs off the shelf: every job's own reservation,
+// added up, so two oil changes on one trip ask for both lots of oil rather
+// than one.
+function partsNeededAcross(records) {
   const merged = new Map();
   for (const record of records) {
-    for (const need of partsNeededFor(record, schedule)) {
+    for (const need of record.partsNeeded || []) {
       if (!need.partId) continue;
       const current = merged.get(need.partId) || { ...need, quantity: 0 };
       current.quantity += Number(need.quantity) || 0;
@@ -2431,8 +2515,9 @@ async function deleteService(state, id) {
   });
   if (!ok) return;
   const removed = state.services.find((service) => service.id === id);
-  // Whatever it took off the shelf goes back on.
-  await applyPartUsage(removed?.parts || [], []);
+  // Whatever it took off the shelf goes back on -- a done record's actual
+  // usage, or a still-open one's reservation, whichever this one has.
+  await applyPartUsage(currentlyReserved(removed), []);
   await deleteServicePhotos(state.id, id);
   await deleteDoc(doc(db, "vehicles", state.id, "services", id));
   await recomputeSummary(state.id);
@@ -2734,7 +2819,7 @@ async function openPlanForm(state, existing) {
         value: existing?.partsNeeded || [],
         catalogue: state.parts || [],
         vehicleId: state.id,
-        hint: "What this job uses every time it comes round. Add to list carries this over onto the booked job — nothing leaves the shelf until it's actually marked done.",
+        hint: "What this job uses every time it comes round. Add to list carries this over onto the booked job, which is what actually reserves it off the shelf — setting it here doesn't.",
       },
     ],
     submitLabel: existing ? "Save changes" : "Add it",
@@ -2795,12 +2880,16 @@ async function bookScheduleEntry(vehicleId, entry, services, { partsNeeded = [] 
     repeatMiles: entry.everyMiles ?? null,
     repeatMonths: entry.everyMonths ?? null,
     partsNeeded,
+    reserved: true,
   };
 
   const added = await addDoc(collection(db, "vehicles", vehicleId, "services"), {
     ...payload,
     createdAt: serverTimestamp(),
   });
+  // The schedule entry's parts list is only a default until this moment --
+  // booking the job is what actually reserves it off the shelf.
+  await applyPartUsage([], partsNeeded);
   await recomputeSummary(vehicleId);
   showToast(`${entry.title} added to the service list`);
   return { id: added.id, ...payload };
@@ -2819,6 +2908,20 @@ async function bookPlanEntry(state, id) {
   }).find((entry) => entry.id === id);
   if (!row) return;
   await bookScheduleEntry(state.id, row, state.services, { partsNeeded: row.partsNeeded || [] });
+}
+
+// What's actually been taken off the shelf for a record already, as opposed
+// to what it simply lists. A done record's real usage is always in `parts`.
+// An open one's is in `partsNeeded`, but only once `reserved` says that list
+// has actually been charged to the shelf -- a record from before parts
+// started reserving at assignment time carries a partsNeeded list that was
+// never deducted, so treating it as already-reserved would silently skip
+// charging the shelf the first time that record is touched. See
+// migratePartsReservations for the one-time sweep that catches the rest.
+function currentlyReserved(record) {
+  if (!record) return [];
+  if (record.status === "done") return record.parts || [];
+  return record.reserved ? record.partsNeeded || [] : [];
 }
 
 // Moves the shelf by the difference between what a record used to book and what
