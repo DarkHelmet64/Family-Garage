@@ -481,6 +481,7 @@ export function serviceNameReport(vehicles) {
       key: entry.key,
       name: [...entry.casing.entries()].sort((a, b) => b[1] - a[1])[0][0],
       vehicles: entry.vehicleIds.size,
+      vehicleIds: [...entry.vehicleIds],
       records: entry.records,
     }))
     .sort((a, b) => a.name.localeCompare(b.name));

@@ -49,6 +49,7 @@ import {
   undoDerivedTitle,
   scheduleRows,
   normalizeJob,
+  lastDoneFor,
   isLowStock,
   upcomingWork,
   partsForecast,
@@ -280,11 +281,13 @@ function openGarageMenu() {
 //
 // The same job ends up typed a few different ways over the years -- "Oil chg",
 // "oil change", "Oil Change" -- and everything that matches on a job's name --
-// the schedule deciding what's already booked, the suggestion list, the badge
-// on the garage card -- treats each spelling as a different job. This is a
-// register of every name in the garage, with a way to fix one everywhere at
-// once: the schedule entry, the booked job, and every past visit that used it,
-// on every vehicle.
+// the schedule deciding what's already booked, the suggestion list, what
+// shows in Coming up -- treats each spelling as a different job. This is a
+// register of every name in the garage: tap one to see which vehicles carry
+// it and when it was last actually done on each, or fix it everywhere at
+// once -- the schedule entry, the booked job, and every past visit that used
+// it, on every vehicle. Merge picks up where a single rename leaves off, for
+// when more than two spellings need folding into one in a single pass.
 //
 // Read once when the page opens, the same as the look-ahead and for the same
 // reason: answering it needs every vehicle's schedule and service records, not
@@ -295,17 +298,24 @@ function renderServiceNamesView() {
   $app.innerHTML = `
     <a class="back-link" href="./">&larr; Garage</a>
     <h1><span class="emoji">🏷️</span>Service names</h1>
-    <p class="hint">Every job name in use across the garage. Rename one and it updates
-    every schedule entry, booked job, and past visit that used it — on every vehicle.</p>
+    <p class="hint">Every job name in use across the garage. Tap one to see which vehicles
+    carry it and when it was last done. Rename or merge changes every schedule entry,
+    booked job, and past visit that used it — on every vehicle.</p>
     <div id="names-list"><p class="loading">Reading the whole garage…</p></div>
   `;
 
-  const state = { vehicles: [], report: [] };
+  const state = {
+    vehicles: [],
+    report: [],
+    expandedNames: new Set(),
+    mergeMode: false,
+    mergeSelected: new Set(),
+  };
 
   $app.addEventListener("click", (event) => {
-    const target = event.target.closest("[data-act=edit-name]");
+    const target = event.target.closest("[data-act]");
     if (!target) return;
-    Promise.resolve(handleRenameAction(target.dataset.id, state)).catch(reportActionFailure);
+    Promise.resolve(handleNamesAction(target.dataset.act, target.dataset.id, state)).catch(reportActionFailure);
   });
 
   state.reload = () =>
@@ -322,23 +332,174 @@ function renderServiceNamesView() {
   state.reload();
 }
 
-function renderNamesList(state) {
-  state.report = serviceNameReport(state.vehicles);
-  document.getElementById("names-list").innerHTML = state.report.length
-    ? `<div class="list">${state.report.map(nameRowHtml).join("")}</div>`
-    : `<p class="empty small">Nothing logged yet. A name shows up here as soon as a vehicle has a
-       schedule entry or a service record.</p>`;
+function handleNamesAction(action, id, state) {
+  switch (action) {
+    case "toggle-name":
+      if (state.expandedNames.has(id)) state.expandedNames.delete(id);
+      else state.expandedNames.add(id);
+      renderNamesList(state);
+      return null;
+    case "edit-name":
+      return handleRenameAction(id, state);
+    case "start-merge":
+      state.mergeMode = true;
+      state.mergeSelected = new Set();
+      renderNamesList(state);
+      return null;
+    case "cancel-merge":
+      state.mergeMode = false;
+      state.mergeSelected = new Set();
+      renderNamesList(state);
+      return null;
+    case "toggle-merge-select":
+      if (state.mergeSelected.has(id)) state.mergeSelected.delete(id);
+      else state.mergeSelected.add(id);
+      renderNamesList(state);
+      return null;
+    case "do-merge":
+      return handleMergeAction(state);
+    default:
+      return null;
+  }
 }
 
-function nameRowHtml(entry) {
-  return `
-    <div class="row tappable" data-act="edit-name" data-id="${escapeHtml(entry.key)}">
-      <div class="row-main">
-        <span class="row-title-text">${escapeHtml(entry.name)}</span>
-        <span class="row-meta">${entry.vehicles} vehicle${entry.vehicles === 1 ? "" : "s"} · ${entry.records} record${entry.records === 1 ? "" : "s"}</span>
+function renderNamesList(state) {
+  state.report = serviceNameReport(state.vehicles);
+  const listEl = document.getElementById("names-list");
+
+  if (!state.report.length) {
+    listEl.innerHTML = `<p class="empty small">Nothing logged yet. A name shows up here as soon as a vehicle has a
+       schedule entry or a service record.</p>`;
+    return;
+  }
+
+  listEl.innerHTML = `
+    <div class="section-title row-title">
+      <span>${state.report.length} name${state.report.length === 1 ? "" : "s"}</span>
+      <div class="heading-actions">
+        ${
+          state.report.length > 1
+            ? `<button class="secondary small" data-act="${state.mergeMode ? "cancel-merge" : "start-merge"}">${state.mergeMode ? "Cancel" : "Merge"}</button>`
+            : ""
+        }
       </div>
     </div>
+    ${
+      state.mergeMode
+        ? `<p class="hint">Two or more names for the same job? Pick them and merge into
+           one — you choose which spelling wins.</p>`
+        : ""
+    }
+    <div class="list">${state.report.map((entry) => nameRowHtml(entry, state)).join("")}</div>
+    ${
+      state.mergeMode && state.mergeSelected.size > 1
+        ? `<button class="secondary full-action" data-act="do-merge">Merge ${state.mergeSelected.size} names</button>`
+        : ""
+    }
   `;
+}
+
+function nameRowHtml(entry, state) {
+  const meta = `${entry.vehicles} vehicle${entry.vehicles === 1 ? "" : "s"} · ${entry.records} record${entry.records === 1 ? "" : "s"}`;
+
+  if (state.mergeMode) {
+    const picked = state.mergeSelected.has(entry.key);
+    return `
+      <div class="row tappable ${picked ? "picked" : ""}" data-act="toggle-merge-select" data-id="${escapeHtml(entry.key)}">
+        <input class="row-check" type="checkbox" tabindex="-1" ${picked ? "checked" : ""} />
+        <div class="row-main">
+          <span class="row-title-text">${escapeHtml(entry.name)}</span>
+          <span class="row-meta">${meta}</span>
+        </div>
+      </div>
+    `;
+  }
+
+  const open = state.expandedNames.has(entry.key);
+  return `
+    <div class="row tappable" data-act="toggle-name" data-id="${escapeHtml(entry.key)}" aria-expanded="${open}">
+      <div class="row-main">
+        <span class="row-title-text">${escapeHtml(entry.name)}</span>
+        <span class="row-meta">${meta}</span>
+      </div>
+      <div class="row-side">
+        <span class="status-caret">${open ? "▾" : "▸"}</span>
+        <button class="secondary small" data-act="edit-name" data-id="${escapeHtml(entry.key)}">Rename</button>
+      </div>
+    </div>
+    ${open ? `<div class="list status-jobs">${nameDetailHtml(entry, state.vehicles)}</div>` : ""}
+  `;
+}
+
+// Which vehicles carry this name, and when it was last actually done on each
+// -- the drill-down a bare count can't answer. "Last done" only counts a
+// completed record; a schedule entry or a booked-but-not-done job that shares
+// the name still puts the vehicle in the list, just with nothing done yet.
+function nameDetailHtml(entry, vehicles) {
+  const rows = entry.vehicleIds
+    .map((id) => vehicles.find((v) => v.id === id))
+    .filter(Boolean)
+    .sort((a, b) => a.name.localeCompare(b.name));
+
+  return rows
+    .map((vehicle) => {
+      const last = lastDoneFor(entry.key, vehicle.services || []);
+      const lastText = last
+        ? `last done ${[
+            last.servicedOn ? formatISO(last.servicedOn) : null,
+            last.odometerMiles !== null ? `at ${formatMiles(last.odometerMiles)}` : null,
+          ]
+            .filter(Boolean)
+            .join(" ")}`
+        : "not logged yet";
+      return `
+        <div class="row plan-row">
+          <div class="row-main">
+            <span class="row-title-text">${escapeHtml(vehicle.name)}</span>
+            <span class="row-meta">${escapeHtml(lastText)}</span>
+          </div>
+          <div class="row-side">
+            <a class="ghost btn" href="?vehicle=${encodeURIComponent(vehicle.id)}">Open</a>
+          </div>
+        </div>
+      `;
+    })
+    .join("");
+}
+
+// Two or more existing names, folded into whichever one the person picks --
+// same underlying rewrite as a single rename, just aimed at every loser in
+// one pass instead of asking for each by hand.
+async function handleMergeAction(state) {
+  if (state.mergeSelected.size < 2) return;
+  const entries = state.report.filter((row) => state.mergeSelected.has(row.key));
+
+  const winnerKey = await openPickerModal({
+    title: "Merge as which name?",
+    options: entries.map((row) => ({
+      value: row.key,
+      label: `${row.name} (${row.vehicles} vehicle${row.vehicles === 1 ? "" : "s"} · ${row.records} record${row.records === 1 ? "" : "s"})`,
+    })),
+  });
+  if (!winnerKey) return;
+
+  const winner = entries.find((row) => row.key === winnerKey);
+  let recordsTouched = 0;
+  for (const loser of entries) {
+    if (loser.key === winner.key) continue;
+    const result = await renameServiceEverywhere(state.vehicles, loser.name, winner.name);
+    recordsTouched += result.records;
+  }
+
+  showToast(
+    recordsTouched
+      ? `Merged into "${winner.name}" — ${recordsTouched} record${recordsTouched === 1 ? "" : "s"} updated`
+      : "Nothing needed changing"
+  );
+
+  state.mergeMode = false;
+  state.mergeSelected = new Set();
+  await state.reload();
 }
 
 async function handleRenameAction(key, state) {

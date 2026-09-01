@@ -660,17 +660,25 @@ garage, with how many vehicles and how many records carry each — grouped the
 same case-and-spacing-insensitive way scheduling already decides two jobs are
 the same one, so "Oil chg" and "oil CHANGE" show up as one row, not two.
 
-Tap a name to rename it, and it changes **everywhere**: every schedule entry
-that names it, every booked job, every item on a past visit, and which job a
-booked part was for — on every vehicle, not just one. Typing back the name
-already showing still does something useful: it normalizes any stray-cased
-variant to that exact spelling.
+Tap a name and it expands into which vehicles carry it and when it was last
+actually done on each, with an **Open** link straight to that vehicle. A
+vehicle that only has a schedule entry or a booked job for it — nothing done
+yet — shows "not logged yet" instead of a date.
 
-Renaming to a name that's already in use merges the two — if "Oil Chg" and "Oil
-change" were really the same job typed two ways, renaming one to the other
-folds them into a single row here. It doesn't merge *records* on any one
-vehicle, though — two records with the same name on the same vehicle after a
-rename are exactly what they were before, just agreeing on what to call it.
+**Rename** changes it **everywhere**: every schedule entry that names it,
+every booked job, every item on a past visit, and which job a booked part was
+for — on every vehicle, not just one. Typing back the name already showing
+still does something useful: it normalizes any stray-cased variant to that
+exact spelling. Renaming to a name that's already in use merges the two — if
+"Oil Chg" and "Oil change" were really the same job typed two ways, renaming
+one to the other folds them into a single row here.
+
+**Merge** does the same thing for more than two at once: tick the names that
+are really the same job, tap **Merge**, and pick which spelling wins —
+everything else picked rewrites to that one, everywhere, in a single pass.
+Either way, it doesn't merge *records* on any one vehicle — two records with
+the same name on the same vehicle after a rename or a merge are exactly what
+they were before, just agreeing on what to call it.
 
 ## Security note
 
