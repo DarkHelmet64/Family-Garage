@@ -579,28 +579,32 @@ function renderComingUp(state) {
       .filter(Boolean)
       .join(" · ")}. Tap a count to see the jobs; open a vehicle for their dates and mileages.</p>
 
-    ${
-      shortages.length
-        ? `<div class="card shopping">
-             <div class="section-title">To buy</div>
-             ${shortages
-               .map(
-                 (need) => `<div class="shopping-row">
-                   <span>${escapeHtml(need.name)}</span>
-                   <span class="shopping-need">${need.short} ${escapeHtml(need.unit)} short<span class="muted"> · need ${need.quantity}, have ${need.have}</span></span>
-                   ${
-                     shoppingDetail(need)
-                       ? `<span class="shopping-detail">${escapeHtml(shoppingDetail(need))}</span>`
-                       : ""
-                   }
-                 </div>`
-               )
-               .join("")}
-           </div>`
-        : forecast.length
-          ? `<p class="hint ok-line">Everything these jobs need is on the shelf.</p>`
-          : ""
-    }
+    <div class="card shopping">
+      <div class="section-title">To buy</div>
+      ${
+        shortages.length
+          ? shortages
+              .map(
+                (need) => `<div class="shopping-row">
+                  <span>${escapeHtml(need.name)}</span>
+                  <span class="shopping-need">${need.short} ${escapeHtml(need.unit)} short<span class="muted"> · need ${need.quantity}, have ${need.have}</span></span>
+                  ${
+                    shoppingDetail(need)
+                      ? `<span class="shopping-detail">${escapeHtml(shoppingDetail(need))}</span>`
+                      : ""
+                  }
+                </div>`
+              )
+              .join("")
+          : forecast.length
+            ? `<p class="hint ok-line">Everything these jobs need is on the shelf.</p>`
+            : `<p class="hint">None of these jobs have parts listed yet. A job merely due
+               on the schedule doesn't carry a parts list of its own — <strong>Add to
+               list</strong> it from the vehicle's Service schedule and note what it
+               needs, or add a list to a job you've already booked, and it'll show up
+               here.</p>`
+      }
+    </div>
 
     <div class="plan-vehicles">${sections}</div>
   `;

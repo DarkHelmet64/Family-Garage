@@ -623,6 +623,15 @@ for them — in the aisle you want what the shelf says now, and a job booked
 before any of that was recorded has none of it. What the job noted is used only
 if the part has since left the shelf entirely.
 
+**To buy** is always on screen while something's overdue or due soon, in one of
+three states: what's short, "everything these jobs need is on the shelf" once
+none of it is, or — if not one of the pressing jobs has a parts list at all — a
+line saying so, rather than the card just not appearing. That third state is
+worth knowing on its own: a job the schedule merely implies is due carries no
+parts list of its own, only what's attached when you book it in by hand. If
+every pressing job in the garage is schedule-implied rather than booked, **To
+buy** stays in that third state until one of them is.
+
 Working this out needs every vehicle's schedule, services and fill-ups, which
 the vehicle list itself doesn't — so it's read after the list has been asked
 for, and the list appears without waiting on it. It's read once when the page
