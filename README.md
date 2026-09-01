@@ -651,14 +651,20 @@ worth knowing on its own: a job carries no parts list until something has said
 what it needs — [a schedule entry](#the-service-schedule), or a job booked in
 by hand.
 
-**To buy** reads that straight off the schedule entry, not off whatever's
-booked — before anyone's tapped **Add to list**, and after. Booking a job
-copies its schedule entry's parts list over so the record itself is never
-empty, but the schedule entry keeps being the one that counts: edit it later
-— say, once you find out the filter's a different size — and the buy list
-follows, even for a job that's already on the list, with nothing to re-book.
-A job with no matching schedule entry — the one-off, added by hand — has
-nowhere else to defer to, so it still goes by whatever it noted for itself.
+**To buy** reads that straight off the schedule entry when it actually has one
+set, not off whatever's booked — before anyone's tapped **Add to list**, and
+after. Booking a job copies its schedule entry's parts list over so the
+record itself is never empty, but the schedule entry keeps being the one
+that counts: edit it later — say, once you find out the filter's a different
+size — and the buy list follows, even for a job that's already on the list,
+with nothing to re-book. A schedule entry that's simply never had parts set
+isn't treated as a deliberate "needs nothing", though — most jobs on most
+schedules haven't — so a booked job that has its own list, whether typed in
+by hand or copied over before the schedule entry lost it some other way,
+keeps using that until the schedule entry actually says something different.
+A job with no matching schedule entry at all — the one-off, added by hand —
+has nowhere else to defer to either, so it goes by whatever it noted for
+itself the same way.
 
 That same rule reaches past the buy list: the vehicle page's own **Needs**
 line on a booked job, what **Mark done** pre-fills into parts used, and what
