@@ -250,10 +250,14 @@ export function itemsTotalCents(items) {
 
 // Every dollar spent at the shop, across every completed visit -- the fuel
 // log's totals have a counterpart here so the two can be added together.
+// Reads each record's own stored costCents rather than re-summing its items,
+// since that figure already carries labor on top of them -- a whole-record
+// cost, same as items themselves are, that recomputing from items alone
+// would silently drop.
 export function totalServiceCostCents(services) {
   return services
     .filter((record) => record.status === "done")
-    .reduce((sum, record) => sum + (itemsTotalCents(serviceItems(record)) || 0), 0);
+    .reduce((sum, record) => sum + (record.costCents || 0), 0);
 }
 
 // What a visit is called. Just the first job -- not "Oil change + 2 more".

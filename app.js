@@ -1768,8 +1768,13 @@ function serviceHistoryRowHtml(service, state) {
   const items = serviceItems(service);
   // One job reads as it always has. Several are broken out underneath, each
   // with what it cost, since that's the point of entering them separately.
+  // Labor gets its own line the same way whenever there's one to show -- the
+  // total on the right otherwise wouldn't match what's itemized underneath it.
+  const laborLine = service.laborCostCents
+    ? `<li><span>Labor</span><span class="item-cost">${escapeHtml(formatUSD(service.laborCostCents))}</span></li>`
+    : "";
   const breakdown =
-    items.length > 1
+    items.length > 1 || laborLine
       ? `<ul class="item-breakdown">
            ${items
              .map(
@@ -1780,6 +1785,7 @@ function serviceHistoryRowHtml(service, state) {
              </li>`
              )
              .join("")}
+           ${laborLine}
          </ul>`
       : items[0] && items[0].notes
         ? `<span class="row-note">${escapeHtml(items[0].notes)}</span>`
@@ -2300,6 +2306,11 @@ async function openCompletedServiceForm(state, existing, odometerMiles, { comple
   const mergedPhotos = combining
     ? [...existingPhotos, ...combiningPhotos.flatMap((loaded) => loaded.photos).map(({ id, ...rest }) => rest)]
     : existingPhotos;
+  const laborCentsSoFar = combining
+    ? (existing?.laborCostCents || 0) + combining.reduce((sum, record) => sum + (record.laborCostCents || 0), 0)
+    : folding
+      ? folding.reduce((sum, record) => sum + (record.laborCostCents || 0), 0)
+      : existing?.laborCostCents || 0;
   const values = await openFormModal({
     title: combining
       ? "Combine into one visit"
@@ -2358,6 +2369,21 @@ async function openCompletedServiceForm(state, existing, odometerMiles, { comple
         value: combining ? sharedShop([existing, ...combining]) : existing?.shop || (folding ? sharedShop(folding) : "") || "",
         placeholder: "Dave's Auto",
         suggestions: shops,
+      },
+      {
+        name: "laborCost",
+        label: "Labor cost (optional)",
+        type: "number",
+        step: "0.01",
+        inputmode: "decimal",
+        min: 0,
+        half: true,
+        // Combining or folding several visits into one brings their labor
+        // costs with them, added together -- same as items and parts do,
+        // nothing about the trip gets left behind.
+        value: laborCentsSoFar ? (laborCentsSoFar / 100).toFixed(2) : "",
+        placeholder: "60.00",
+        hint: "Added on top of the items above.",
       },
       {
         name: "partsUsed",
@@ -2420,6 +2446,7 @@ async function openCompletedServiceForm(state, existing, odometerMiles, { comple
       if ((v.items || []).some((item) => item.costCents !== null && Number.isNaN(item.costCents))) {
         return "One of those costs doesn't look like an amount.";
       }
+      if (v.laborCost && Number.isNaN(dollarsToCents(v.laborCost))) return "That labor cost doesn't look like an amount.";
       return null;
     },
   });
@@ -2432,6 +2459,7 @@ async function openCompletedServiceForm(state, existing, odometerMiles, { comple
   const odo = values.odometer ? Math.round(Number(values.odometer)) : null;
   const repeatMiles = values.repeatMiles ? Math.round(Number(values.repeatMiles)) : null;
   const repeatMonths = values.repeatMonths ? Math.round(Number(values.repeatMonths)) : null;
+  const laborCostCents = values.laborCost ? dollarsToCents(values.laborCost) : null;
 
   const items = (values.items || []).filter((item) => item.title);
   const partsUsed = values.partsUsed || [];
@@ -2442,8 +2470,10 @@ async function openCompletedServiceForm(state, existing, odometerMiles, { comple
     odometerMiles: odo,
     items,
     // Kept alongside the items so lists and totals don't have to add them up
-    // every time they render.
-    costCents: itemsTotalCents(items),
+    // every time they render -- labor on top, since it's the visit's own
+    // cost rather than any one job's.
+    costCents: (itemsTotalCents(items) || 0) + (laborCostCents || 0) || null,
+    laborCostCents,
     shop: values.shop || null,
     // Notes belong to the item they're about now; the field stays on the record
     // so anything written before this still reads back.

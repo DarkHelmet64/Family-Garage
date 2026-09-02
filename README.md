@@ -304,9 +304,10 @@ record. The list never covers the sheet's own Save and Cancel buttons.
 
 ### One visit, several jobs
 
-A trip to the shop usually isn't one thing. The date, odometer, shop, and
-receipt are shared, so you enter those once and add a line for each job: what
-was done, what it cost, and any note about that particular job. **+ Add item**
+A trip to the shop usually isn't one thing. The date, odometer, shop, labor
+cost, and receipt are shared, so you enter those once and add a line for each
+job: what was done, what it cost, and any note about that particular job.
+**+ Add item**
 adds another line, and the **total is added up for you** as you type — no adding
 up the receipt by hand, and no invented number to reconcile against it later.
 
@@ -368,6 +369,25 @@ visit was first logged. Unlike folding open jobs into a visit, there's no
 partial-match safety valve here: picking the records is already the deliberate
 step, so editing a line before you save changes what it says, not whether its
 source record gets combined in.
+
+#### Labor cost
+
+**Labor cost (optional)** sits next to Shop whenever you're logging or marking
+a service done — a plain log, **Mark done**, **Log as one visit**, **Combine**,
+or editing an already-done record. It's a whole-visit figure, not one more line
+item — set once for the trip, the way Shop is, rather than split across jobs
+that don't actually bill separately for the work. It's added on top of
+whatever the items list comes to, and shows on its own line ("Labor $60.00")
+alongside them wherever a visit's breakdown is shown, so the total on the right
+always matches what's itemized underneath it. **Service total**, **Total w/
+service**, and **Cost per mile w/ service** on the vehicle page all count it —
+labor is part of what a visit actually cost, same as any job on it.
+
+Folding several open jobs into one visit, or combining several past ones, adds
+their labor costs together rather than picking one and dropping the rest —
+nothing about the trip gets left behind, same as items and parts. It never
+appears on the not-yet-done scheduling sheet (**Schedule something coming
+up**) — there's no labor to speak of until the work's actually done.
 
 Open services are sorted with the most pressing first and color-coded: red for
 **overdue** (the date has passed, or you've driven past the mileage), amber for
