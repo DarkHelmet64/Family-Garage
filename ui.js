@@ -840,6 +840,10 @@ function bindListField(overlay, field) {
   const rowsEl = overlay.querySelector(`[data-list-rows="${field.name}"]`);
   const totalEl = overlay.querySelector(`[data-list-total="${field.name}"]`);
   const addButton = overlay.querySelector(`[data-list-add="${field.name}"]`);
+  // A sibling field (labor cost, say) that's added on top of the items here
+  // rather than being one of them -- counted into the same running total so
+  // what's shown while filling the sheet in matches what's actually saved.
+  const extraCostInput = field.extraCostField ? overlay.querySelector(`[data-field="${field.extraCostField}"]`) : null;
 
   // Rows carry an id of their own because another field points at them, and
   // position won't do for that: removing the first line would silently move
@@ -870,12 +874,16 @@ function bindListField(overlay, field) {
 
   const updateTotal = () => {
     if (titlesOnly) return;
-    const cents = [...rowsEl.querySelectorAll("[data-item-cost]")].reduce((sum, input) => {
+    const itemCents = [...rowsEl.querySelectorAll("[data-item-cost]")].reduce((sum, input) => {
       const value = dollarsToCents(input.value);
       return sum + (input.value && Number.isFinite(value) ? value : 0);
     }, 0);
+    const extraValue = extraCostInput ? dollarsToCents(extraCostInput.value) : NaN;
+    const extraCents = extraCostInput && extraCostInput.value && Number.isFinite(extraValue) ? extraValue : 0;
+    const cents = itemCents + extraCents;
     totalEl.textContent = cents ? `Total ${formatUSD(cents)}` : "";
   };
+  if (extraCostInput) extraCostInput.addEventListener("input", updateTotal);
 
   const render = () => {
     rowsEl.innerHTML = rows
