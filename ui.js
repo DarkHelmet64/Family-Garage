@@ -1044,6 +1044,139 @@ export function openPhotoViewer(photo, { onRemove } = {}) {
       onRemove();
     });
   }
+  attachPhotoZoom(overlay.querySelector(".photo-view img"));
+}
+
+// Pinch to zoom, drag to pan once zoomed, double-tap (or double-click) to
+// toggle between fit and a closer look -- scoped to just this image, since
+// the page's own viewport blocks pinch-zoom everywhere else to keep the rest
+// of the layout from getting away from someone's thumb. Mouse panning rides
+// on pointer capture rather than a window-level listener, so there's nothing
+// to unregister when the modal closes -- it goes away with the image.
+function attachPhotoZoom(img) {
+  if (!img) return;
+  const MIN_SCALE = 1;
+  const MAX_SCALE = 4;
+  const TAP_ZOOM_SCALE = 2.5;
+  let scale = 1;
+  let x = 0;
+  let y = 0;
+  let pinchStartDist = 0;
+  let pinchStartScale = 1;
+  let panFrom = null; // "touch", a mouse pointerId, or null
+  let panStartX = 0;
+  let panStartY = 0;
+  let panOriginX = 0;
+  let panOriginY = 0;
+  let lastTapAt = 0;
+
+  const apply = () => {
+    img.style.transform = `translate(${x}px, ${y}px) scale(${scale})`;
+    img.style.cursor = scale > MIN_SCALE ? "grab" : "zoom-in";
+  };
+  const clampScale = (s) => Math.min(MAX_SCALE, Math.max(MIN_SCALE, s));
+  const reset = () => {
+    scale = 1;
+    x = 0;
+    y = 0;
+    apply();
+  };
+  const toggleZoom = () => {
+    if (scale > MIN_SCALE) reset();
+    else {
+      scale = TAP_ZOOM_SCALE;
+      apply();
+    }
+  };
+  const touchDist = (touches) =>
+    Math.hypot(touches[0].clientX - touches[1].clientX, touches[0].clientY - touches[1].clientY);
+
+  img.style.touchAction = "none";
+
+  img.addEventListener(
+    "touchstart",
+    (e) => {
+      if (e.touches.length === 2) {
+        pinchStartDist = touchDist(e.touches);
+        pinchStartScale = scale;
+        panFrom = null;
+      } else if (e.touches.length === 1) {
+        const now = Date.now();
+        if (now - lastTapAt < 300) {
+          toggleZoom();
+          lastTapAt = 0;
+          return;
+        }
+        lastTapAt = now;
+        if (scale > MIN_SCALE) {
+          panFrom = "touch";
+          panStartX = e.touches[0].clientX;
+          panStartY = e.touches[0].clientY;
+          panOriginX = x;
+          panOriginY = y;
+        }
+      }
+    },
+    { passive: true }
+  );
+
+  img.addEventListener(
+    "touchmove",
+    (e) => {
+      if (e.touches.length === 2) {
+        e.preventDefault();
+        scale = clampScale(pinchStartScale * (touchDist(e.touches) / pinchStartDist));
+        apply();
+      } else if (e.touches.length === 1 && panFrom === "touch") {
+        e.preventDefault();
+        x = panOriginX + (e.touches[0].clientX - panStartX);
+        y = panOriginY + (e.touches[0].clientY - panStartY);
+        apply();
+      }
+    },
+    { passive: false }
+  );
+
+  img.addEventListener("touchend", (e) => {
+    if (e.touches.length === 0) panFrom = null;
+    if (scale <= MIN_SCALE) reset();
+  });
+
+  img.addEventListener("dblclick", toggleZoom);
+  img.addEventListener(
+    "wheel",
+    (e) => {
+      e.preventDefault();
+      scale = clampScale(scale - e.deltaY * 0.0025);
+      if (scale <= MIN_SCALE) {
+        reset();
+        return;
+      }
+      apply();
+    },
+    { passive: false }
+  );
+
+  img.addEventListener("pointerdown", (e) => {
+    if (e.pointerType !== "mouse" || scale <= MIN_SCALE) return;
+    img.setPointerCapture(e.pointerId);
+    panFrom = e.pointerId;
+    panStartX = e.clientX;
+    panStartY = e.clientY;
+    panOriginX = x;
+    panOriginY = y;
+  });
+  img.addEventListener("pointermove", (e) => {
+    if (e.pointerId !== panFrom) return;
+    x = panOriginX + (e.clientX - panStartX);
+    y = panOriginY + (e.clientY - panStartY);
+    apply();
+  });
+  img.addEventListener("pointerup", (e) => {
+    if (e.pointerId === panFrom) panFrom = null;
+  });
+
+  apply();
 }
 
 // ---------------------------------------------------------------------------

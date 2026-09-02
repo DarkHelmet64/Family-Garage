@@ -250,10 +250,14 @@ export function itemsTotalCents(items) {
 
 // Every dollar spent at the shop, across every completed visit -- the fuel
 // log's totals have a counterpart here so the two can be added together.
+// Reads each record's own stored costCents rather than re-summing its items,
+// since that figure already carries labor on top of them -- a whole-record
+// cost, same as items themselves are, that recomputing from items alone
+// would silently drop.
 export function totalServiceCostCents(services) {
   return services
     .filter((record) => record.status === "done")
-    .reduce((sum, record) => sum + (itemsTotalCents(serviceItems(record)) || 0), 0);
+    .reduce((sum, record) => sum + (record.costCents || 0), 0);
 }
 
 // What a visit is called. Just the first job -- not "Oil change + 2 more".
@@ -487,7 +491,12 @@ export function scheduleRows(schedule, services, { odometerMiles = null, today =
 // One row per distinct job name across every vehicle's schedule and service
 // records: the casing seen most often (that's what a rename starts from), how
 // many vehicles carry it, and how many records.
-export function serviceNameReport(vehicles) {
+// `serviceNames` is the garage's own list of names -- added ahead of time,
+// favorited, or scoped to particular vehicles, the same shelf-wide way parts
+// carry a `fitsVehicleIds`. A name saved there shows up here even with
+// nothing logged yet; one that's only ever been typed into a record shows up
+// too, just without a saved doc behind it (`id: null`) until it's edited.
+export function serviceNameReport(vehicles, serviceNames = []) {
   const byKey = new Map();
 
   const seen = (title, vehicleId) => {
@@ -512,15 +521,46 @@ export function serviceNameReport(vehicles) {
     }
   }
 
+  for (const saved of serviceNames) {
+    const raw = String(saved.name || "").trim();
+    if (!raw) continue;
+    const key = normalizeJob(raw);
+    if (!byKey.has(key)) byKey.set(key, { key, casing: new Map([[raw, 1]]), vehicleIds: new Set(), records: 0 });
+  }
+
+  const savedByKey = new Map(serviceNames.map((saved) => [normalizeJob(saved.name), saved]));
+
   return [...byKey.values()]
-    .map((entry) => ({
-      key: entry.key,
-      name: [...entry.casing.entries()].sort((a, b) => b[1] - a[1])[0][0],
-      vehicles: entry.vehicleIds.size,
-      vehicleIds: [...entry.vehicleIds],
-      records: entry.records,
-    }))
+    .map((entry) => {
+      const saved = savedByKey.get(entry.key) || null;
+      return {
+        key: entry.key,
+        id: saved?.id || null,
+        name: saved?.name || [...entry.casing.entries()].sort((a, b) => b[1] - a[1])[0][0],
+        vehicles: entry.vehicleIds.size,
+        vehicleIds: [...entry.vehicleIds],
+        records: entry.records,
+        favorite: !!saved?.favorite,
+        fitsVehicleIds: saved?.fitsVehicleIds?.length ? saved.fitsVehicleIds : null,
+      };
+    })
     .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+// Which saved names offer themselves as suggestions on a given vehicle --
+// unrestricted names plus any explicitly scoped to it. Favorites bubble to
+// the top, since that's what marking one is for; with `favoritesOnly`,
+// nothing else is offered at all -- the service schedule's own dropdown,
+// where the whole point is to pick from the handful you actually keep on top
+// of, not everything that's ever been typed.
+export function serviceNameSuggestions(serviceNames, vehicleId, { favoritesOnly = false } = {}) {
+  return (serviceNames || [])
+    .filter((entry) => !entry.fitsVehicleIds?.length || entry.fitsVehicleIds.includes(vehicleId))
+    .filter((entry) => !favoritesOnly || entry.favorite)
+    .slice()
+    .sort((a, b) => (b.favorite ? 1 : 0) - (a.favorite ? 1 : 0) || String(a.name).localeCompare(String(b.name)))
+    .map((entry) => String(entry.name || "").trim())
+    .filter(Boolean);
 }
 
 // ---------------------------------------------------------------------------
