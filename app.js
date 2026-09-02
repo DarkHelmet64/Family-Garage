@@ -53,6 +53,7 @@ import {
   isLowStock,
   upcomingWork,
   shelfShortages,
+  shortageVendors,
   serviceNameReport,
   serviceNameSuggestions,
   STATS_VERSION,
@@ -704,15 +705,30 @@ async function renameServiceEverywhere(vehicles, oldName, newName) {
 function mountComingUp() {
   // Which counts have been opened, by vehicle and status. Kept here rather than
   // in the DOM so a redraw doesn't shut everything you'd opened.
-  const state = { vehicles: [], parts: [], serviceNames: [], loaded: false, expanded: new Set() };
+  const state = {
+    vehicles: [],
+    parts: [],
+    serviceNames: [],
+    loaded: false,
+    expanded: new Set(),
+    // null means every vendor -- set to one to narrow the shelf list to just
+    // what a single trip to that store would cover.
+    buyVendorFilter: null,
+  };
 
   $app.addEventListener("click", (event) => {
-    const target = event.target.closest("[data-act=toggle-group]");
+    const target = event.target.closest("[data-act]");
     if (!target) return;
-    const key = target.dataset.id;
-    if (state.expanded.has(key)) state.expanded.delete(key);
-    else state.expanded.add(key);
-    renderComingUp(state);
+    if (target.dataset.act === "toggle-group") {
+      const key = target.dataset.id;
+      if (state.expanded.has(key)) state.expanded.delete(key);
+      else state.expanded.add(key);
+      renderComingUp(state);
+    } else if (target.dataset.act === "filter-vendor") {
+      const vendor = target.dataset.id || null;
+      state.buyVendorFilter = state.buyVendorFilter === vendor ? null : vendor;
+      renderComingUp(state);
+    }
   });
 
   loadGarage()
@@ -824,13 +840,35 @@ function renderComingUp(state) {
   // everything already spoken for, whether that job is due today or next
   // year. Nothing to check once there's no shelf to speak of.
   const shortages = state.parts.length ? shelfShortages(state.parts) : [];
+  const vendors = shortageVendors(shortages);
+  // A filter picked before the shelf changed underneath it (restocked,
+  // vendor cleared) just quietly falls back to everything rather than
+  // showing an empty list with no visible way out.
+  if (state.buyVendorFilter && !vendors.includes(state.buyVendorFilter)) state.buyVendorFilter = null;
+  const visibleShortages = state.buyVendorFilter
+    ? shortages.filter((need) => need.vendor === state.buyVendorFilter)
+    : shortages;
+
+  const vendorFilterHtml = vendors.length > 1
+    ? `<div class="check-row vendor-filter">
+        <button class="secondary small vendor-chip${state.buyVendorFilter ? "" : " active"}" data-act="filter-vendor" data-id="">All</button>
+        ${vendors
+          .map(
+            (vendor) =>
+              `<button class="secondary small vendor-chip${state.buyVendorFilter === vendor ? " active" : ""}" data-act="filter-vendor" data-id="${escapeHtml(vendor)}">${escapeHtml(vendor)}</button>`
+          )
+          .join("")}
+      </div>`
+    : "";
+
   const buyCard = state.parts.length
     ? `
     <div class="card shopping">
-      <div class="section-title">To buy</div>
+      <div class="section-title">🛒 To buy${shortages.length ? ` <span class="badge soon">${visibleShortages.length}</span>` : ""}</div>
+      ${vendorFilterHtml}
       ${
         shortages.length
-          ? shortages
+          ? visibleShortages
               .map(
                 (need) => `<div class="shopping-row${need.negative ? " negative" : ""}">
                   <span>${escapeHtml(need.name)}</span>

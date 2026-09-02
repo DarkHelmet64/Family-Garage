@@ -682,9 +682,9 @@ whichever falls first. To decide it, a job due on mileage is still turned into a
 date using how fast that vehicle has actually been driven; only miles still to
 drive can be dated that way, so a job you're already past is simply overdue.
 
-Below the vehicle-by-vehicle list is **To buy** — a straight read of the shelf: everything at or
-below the level you said to keep, whatever it took to get there. Each line
-says which one to buy and where:
+Below the vehicle-by-vehicle list is **🛒 To buy** — a straight read of the shelf:
+everything at or below the level you said to keep, whatever it took to get
+there, with the count in the header. Each line says which one to buy and where:
 
 > **0W-20 oil** — **2 qt short** · have 3, keep 5+
 > *model M1-0W20 · 0W-20 · from NAPA*
@@ -696,6 +696,15 @@ merely running low: the count itself is wrong, not just thin. That line reads
 as short of zero rather than short of a level, turns red the same way [the
 shelf page](#parts-and-supplies) already flags it for a recount, and sorts
 to the top of the list ahead of everything else, however short that is.
+
+**One chip per vendor** appears above the list once there's more than one on
+it — tap one to narrow the list to just what that store carries, tap it again
+(or tap **All**) to bring the rest back. The count in the header follows
+whatever's actually showing, so it still reads as "how many, right now" once
+you've narrowed it down rather than always quoting the grand total. A part with
+no vendor set only shows under **All** — there's no store to file it under.
+With everything from a single vendor, or nothing that names one at all, there's
+nothing to filter and no chips appear.
 
 **To buy** doesn't care what any job is due for, or when — a part reserved
 for something eight months out counts exactly the same as one for tomorrow,
