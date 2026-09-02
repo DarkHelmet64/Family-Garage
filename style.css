@@ -945,6 +945,8 @@ input[type="file"] {
 /* Big enough to actually read a receipt on a phone. */
 .photo-view {
   text-align: center;
+  overflow: hidden;
+  border-radius: 10px;
 }
 
 .photo-view img {
