@@ -25,6 +25,16 @@ service cloud.firestore {
       allow delete: if true;
     }
 
+    // The garage's own list of service names -- shared the same way the parts
+    // shelf is, since a job name isn't owned by one vehicle either.
+    match /serviceNames/{nameId} {
+      allow read: if true;
+      allow create, update: if request.resource.data.keys().hasAll(['name'])
+                             && request.resource.data.name is string
+                             && request.resource.data.name.size() > 0;
+      allow delete: if true;
+    }
+
     match /vehicles/{vehicleId} {
       allow read: if true;
       allow create, update: if request.resource.data.keys().hasAll(['name'])

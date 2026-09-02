@@ -266,8 +266,9 @@ Tap **🔧 Add service** at the top of the page for either:
 - **Schedule something coming up** — puts one or more jobs on the list at
   once. **+ Add another job** for a second, third, and so on — each just a
   name ("Oil change", "Replace serpentine belt"). They share a due date, a
-  due mileage, or both (whichever comes first is what the reminder goes by),
-  and optionally a shop and a note. Several jobs due at the same visit save
+  due mileage, both, or neither (whichever's set is what the reminder goes
+  by — leave both blank for a job you just want on the list, with nothing
+  to remind you of yet), and optionally a shop and a note. Several jobs due at the same visit save
   as separate records, one per name, so each shows and gets marked done on
   its own. Parts entered here land on the first job listed — add parts to
   any of the others afterward by editing it on its own. Nothing about it has
@@ -281,19 +282,21 @@ Tap **🔧 Add service** at the top of the page for either:
 
 ### The description dropdown
 
-The description box on a service record offers what you've entered before,
-narrowing as you type. Tap the box with it empty and you get the list: this
-vehicle's own past jobs first, most recent at the top, then anything on its
-schedule, then the common ones (oil change, tire rotation, inspection…).
+The description box on a service record — and the "what was done" box on each
+line of a multi-job visit — offers names from [Service
+names](#service-names), narrowing as you type. Tap the box with it empty and
+you get the list: favorites first, then everything else alphabetically, then
+a handful of common ones (oil change, tire rotation, inspection…) if nothing
+you've saved covers them yet.
 
-Its own history leads on purpose. If every past record on the van says "Oil &
-filter", offering "Oil change" would slowly split one job into two — and the
-schedule page matches jobs by name, so a split name means a service that looks
-overdue when it isn't.
+A name scoped to particular vehicles only offers itself on those — see
+[Which vehicles a part fits](#which-vehicles-a-part-fits) for the same idea
+applied to parts. Everything else offers itself everywhere.
 
-**The shop box works the same way**, drawn from everywhere you've had work done
-— across all your vehicles, not just this one, since a family tends to use the
-same garage for both cars.
+**The shop box is separate** — it isn't a saved list like service names, just
+whatever you've typed into a shop field before, most recent first, drawn from
+everywhere you've had work done across all your vehicles, not just this one,
+since a family tends to use the same garage for both cars.
 
 Arrow keys move through the list, Enter takes the highlighted one, Escape puts
 it away — and Enter on a highlighted suggestion picks it rather than saving the
@@ -403,6 +406,11 @@ Overdue first, then due soon, then the rest. Nothing here is stored as a
 reminder: the next-due figures are worked out from your history every time the
 page opens, so **logging a service moves them on its own**. Shorten an interval
 and every date recalculates on the spot.
+
+**+ Add a service**'s own Service box offers **favorites only** — see
+[Service names](#service-names). The schedule is meant to hold the handful of
+jobs you actually keep on a recurring interval, not every name you've ever
+typed, so nothing suggests itself here until you've starred it.
 
 An entry can also say **what it needs off the shelf** — the same "Parts
 needed" picker as everywhere else, set on the entry itself rather than typed in
@@ -645,7 +653,7 @@ whichever falls first. To decide it, a job due on mileage is still turned into a
 date using how fast that vehicle has actually been driven; only miles still to
 drive can be dated that way, so a job you're already past is simply overdue.
 
-At the top is **To buy** — a straight read of the shelf: everything at or
+Below the vehicle-by-vehicle list is **To buy** — a straight read of the shelf: everything at or
 below the level you said to keep, whatever it took to get there. Each line
 says which one to buy and where:
 
@@ -678,33 +686,55 @@ opens rather than watched live; coming back to the garage reads it again.
 
 The same job ends up typed a few different ways over the years — "Oil chg",
 "oil change", "Oil Change" — and everything that matches on a job's name (the
-schedule deciding what's already booked, the suggestion list, what shows in
-**Coming up**) treats each spelling as a different job.
+schedule deciding what's already booked, the suggestion dropdowns, what shows
+in **Coming up**) treats each spelling as a different job.
 
 **More > 🏷️ Service names** is a register of every name in use across the whole
 garage, with how many vehicles and how many records carry each — grouped the
 same case-and-spacing-insensitive way scheduling already decides two jobs are
 the same one, so "Oil chg" and "oil CHANGE" show up as one row, not two.
 
-Tap a name and it expands into which vehicles carry it and when it was last
-actually done on each, with an **Open** link straight to that vehicle. A
-vehicle that only has a schedule entry or a booked job for it — nothing done
-yet — shows "not logged yet" instead of a date.
+**+ Add name**, next to Merge, adds a name to the register directly — before
+it's ever been typed into a record anywhere. It's there right away in the
+suggestion dropdowns, ready to pick the first time it's actually needed.
 
-**Rename** changes it **everywhere**: every schedule entry that names it,
-every booked job, every item on a past visit, and which job a booked part was
-for — on every vehicle, not just one. Typing back the name already showing
-still does something useful: it normalizes any stray-cased variant to that
-exact spelling. Renaming to a name that's already in use merges the two — if
-"Oil Chg" and "Oil change" were really the same job typed two ways, renaming
-one to the other folds them into a single row here.
+Tap a name (not the Edit button) and it expands into which vehicles carry it
+and when it was last actually done on each, with an **Open** link straight to
+that vehicle. A vehicle that only has a schedule entry or a booked job for it
+— nothing done yet — shows "not logged yet" instead of a date.
 
-**Merge** does the same thing for more than two at once: tick the names that
-are really the same job, tap **Merge**, and pick which spelling wins —
-everything else picked rewrites to that one, everywhere, in a single pass.
-Either way, it doesn't merge *records* on any one vehicle — two records with
-the same name on the same vehicle after a rename or a merge are exactly what
-they were before, just agreeing on what to call it.
+**Edit** covers three things at once, all in the same sheet:
+
+- **Renaming** changes the name **everywhere**: every schedule entry, every
+  booked job, every item on a past visit, and which job a booked part was for
+  — on every vehicle, not just one. Typing back the name already showing still
+  does something useful: it normalizes any stray-cased variant to that exact
+  spelling. Renaming to a name that's already in use merges the two — if "Oil
+  Chg" and "Oil change" were really the same job typed two ways, renaming one
+  to the other folds them into a single row here.
+- **Favorite** stars the name (★, shown right on its row) and puts it in the
+  [service schedule's](#the-service-schedule) own dropdown, which offers
+  favorites only. Nothing is favorited by default, including the common
+  built-in suggestions — star the handful you actually keep on a schedule.
+- **Applies to** scopes the name to particular vehicles, the same "pick none
+  and it fits anything" idea [a part's fit list](#which-vehicles-a-part-fits)
+  uses. A scoped name only offers itself in dropdowns on those vehicles; an
+  unscoped one offers itself everywhere. It doesn't hide the name from the
+  register itself, or from a vehicle it's already used on — only from where it
+  gets *offered* next.
+
+Editing a name that's only ever been derived from usage — never favorited,
+scoped, or added by hand — creates its own saved entry the first time you
+change any of this, same as any other edit.
+
+**Merge** folds more than two names into one at once: tick the names that are
+really the same job, tap **Merge**, and pick which spelling wins — everything
+else picked rewrites to that one, everywhere, in a single pass. The winner
+keeps its own name but picks up **favorite** from either side (favorited beats
+not) and stays **unscoped** if either side was — merging is never how a name
+quietly loses its reach. Either way, it doesn't merge *records* on any one
+vehicle — two records with the same name on the same vehicle after a rename or
+a merge are exactly what they were before, just agreeing on what to call it.
 
 ## Security note
 

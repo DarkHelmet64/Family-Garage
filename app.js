@@ -54,6 +54,7 @@ import {
   upcomingWork,
   shelfShortages,
   serviceNameReport,
+  serviceNameSuggestions,
   STATS_VERSION,
 } from "./stats.js";
 
@@ -298,14 +299,16 @@ function renderServiceNamesView() {
   $app.innerHTML = `
     <a class="back-link" href="./">&larr; Garage</a>
     <h1><span class="emoji">🏷️</span>Service names</h1>
-    <p class="hint">Every job name in use across the garage. Tap one to see which vehicles
-    carry it and when it was last done. Rename or merge changes every schedule entry,
-    booked job, and past visit that used it — on every vehicle.</p>
+    <p class="hint">Every job name in use across the garage, plus any added ahead of time. Tap one to
+    see which vehicles carry it and when it was last done. Star a name to favorite it — that's what
+    the service schedule's dropdown offers. Edit or merge changes every schedule entry, booked job,
+    and past visit that used it — on every vehicle.</p>
     <div id="names-list"><p class="loading">Reading the whole garage…</p></div>
   `;
 
   const state = {
     vehicles: [],
+    serviceNames: [],
     report: [],
     expandedNames: new Set(),
     mergeMode: false,
@@ -322,6 +325,7 @@ function renderServiceNamesView() {
     loadGarage()
       .then((loaded) => {
         state.vehicles = loaded.vehicles;
+        state.serviceNames = loaded.serviceNames;
         renderNamesList(state);
       })
       .catch((err) => {
@@ -339,8 +343,10 @@ function handleNamesAction(action, id, state) {
       else state.expandedNames.add(id);
       renderNamesList(state);
       return null;
+    case "add-name":
+      return openServiceNameForm(null, state);
     case "edit-name":
-      return handleRenameAction(id, state);
+      return openServiceNameForm(state.report.find((row) => row.key === id) || null, state);
     case "start-merge":
       state.mergeMode = true;
       state.mergeSelected = new Set();
@@ -364,26 +370,32 @@ function handleNamesAction(action, id, state) {
 }
 
 function renderNamesList(state) {
-  state.report = serviceNameReport(state.vehicles);
+  state.report = serviceNameReport(state.vehicles, state.serviceNames);
   const listEl = document.getElementById("names-list");
 
-  if (!state.report.length) {
-    listEl.innerHTML = `<p class="empty small">Nothing logged yet. A name shows up here as soon as a vehicle has a
-       schedule entry or a service record.</p>`;
-    return;
-  }
-
-  listEl.innerHTML = `
+  const header = `
     <div class="section-title row-title">
       <span>${state.report.length} name${state.report.length === 1 ? "" : "s"}</span>
       <div class="heading-actions">
+        ${state.mergeMode ? "" : `<button class="secondary small" data-act="add-name">+ Add name</button>`}
         ${
           state.report.length > 1
             ? `<button class="secondary small" data-act="${state.mergeMode ? "cancel-merge" : "start-merge"}">${state.mergeMode ? "Cancel" : "Merge"}</button>`
             : ""
         }
       </div>
-    </div>
+    </div>`;
+
+  if (!state.report.length) {
+    listEl.innerHTML =
+      header +
+      `<p class="empty small"><strong>+ Add name</strong> above, or a name shows up here as soon as a
+       vehicle has a schedule entry or a service record.</p>`;
+    return;
+  }
+
+  listEl.innerHTML = `
+    ${header}
     ${
       state.mergeMode
         ? `<p class="hint">Two or more names for the same job? Pick them and merge into
@@ -400,7 +412,14 @@ function renderNamesList(state) {
 }
 
 function nameRowHtml(entry, state) {
-  const meta = `${entry.vehicles} vehicle${entry.vehicles === 1 ? "" : "s"} · ${entry.records} record${entry.records === 1 ? "" : "s"}`;
+  const meta = [
+    `${entry.vehicles} vehicle${entry.vehicles === 1 ? "" : "s"}`,
+    `${entry.records} record${entry.records === 1 ? "" : "s"}`,
+    entry.fitsVehicleIds ? `only on ${entry.fitsVehicleIds.length}` : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+  const star = entry.favorite ? "★ " : "";
 
   if (state.mergeMode) {
     const picked = state.mergeSelected.has(entry.key);
@@ -408,7 +427,7 @@ function nameRowHtml(entry, state) {
       <div class="row tappable ${picked ? "picked" : ""}" data-act="toggle-merge-select" data-id="${escapeHtml(entry.key)}">
         <input class="row-check" type="checkbox" tabindex="-1" ${picked ? "checked" : ""} />
         <div class="row-main">
-          <span class="row-title-text">${escapeHtml(entry.name)}</span>
+          <span class="row-title-text">${star}${escapeHtml(entry.name)}</span>
           <span class="row-meta">${meta}</span>
         </div>
       </div>
@@ -419,12 +438,12 @@ function nameRowHtml(entry, state) {
   return `
     <div class="row tappable" data-act="toggle-name" data-id="${escapeHtml(entry.key)}" aria-expanded="${open}">
       <div class="row-main">
-        <span class="row-title-text">${escapeHtml(entry.name)}</span>
+        <span class="row-title-text">${star}${escapeHtml(entry.name)}</span>
         <span class="row-meta">${meta}</span>
       </div>
       <div class="row-side">
         <span class="status-caret">${open ? "▾" : "▸"}</span>
-        <button class="secondary small" data-act="edit-name" data-id="${escapeHtml(entry.key)}">Rename</button>
+        <button class="secondary small" data-act="edit-name" data-id="${escapeHtml(entry.key)}">Edit</button>
       </div>
     </div>
     ${open ? `<div class="list status-jobs">${nameDetailHtml(entry, state.vehicles)}</div>` : ""}
@@ -469,7 +488,10 @@ function nameDetailHtml(entry, vehicles) {
 
 // Two or more existing names, folded into whichever one the person picks --
 // same underlying rewrite as a single rename, just aimed at every loser in
-// one pass instead of asking for each by hand.
+// one pass instead of asking for each by hand. Favorite and vehicle scope
+// carry forward too: a favorite loser keeps the winner favorited, and an
+// unrestricted loser keeps the winner unrestricted even if it was scoped on
+// its own -- merging is never how a name quietly loses reach.
 async function handleMergeAction(state) {
   if (state.mergeSelected.size < 2) return;
   const entries = state.report.filter((row) => state.mergeSelected.has(row.key));
@@ -491,6 +513,15 @@ async function handleMergeAction(state) {
     recordsTouched += result.records;
   }
 
+  const favorite = entries.some((row) => row.favorite);
+  const unrestricted = entries.some((row) => !row.fitsVehicleIds);
+  const fitsVehicleIds = unrestricted ? [] : [...new Set(entries.flatMap((row) => row.fitsVehicleIds || []))];
+  await saveServiceName(winner, { name: winner.name, favorite, fitsVehicleIds });
+  for (const loser of entries) {
+    if (loser.key === winner.key || !loser.id) continue;
+    await deleteDoc(doc(db, "serviceNames", loser.id));
+  }
+
   showToast(
     recordsTouched
       ? `Merged into "${winner.name}" — ${recordsTouched} record${recordsTouched === 1 ? "" : "s"} updated`
@@ -502,32 +533,67 @@ async function handleMergeAction(state) {
   await state.reload();
 }
 
-async function handleRenameAction(key, state) {
-  const entry = state.report.find((row) => row.key === key);
-  if (!entry) return;
+// Creates or saves over a name's own doc in the shared list -- an existing
+// doc is updated in place, a name that's only ever been derived from usage
+// gets one for the first time.
+async function saveServiceName(entry, payload) {
+  if (entry?.id) await updateDoc(doc(db, "serviceNames", entry.id), payload);
+  else await addDoc(collection(db, "serviceNames"), { ...payload, createdAt: serverTimestamp() });
+}
 
+// One form for both a brand new name and editing one already in use --
+// adding just skips the everywhere-rewrite a text change would otherwise
+// trigger, since there's nowhere yet for a new name to appear.
+async function openServiceNameForm(entry, state) {
   const values = await openFormModal({
-    title: "Rename service",
-    hint: `Changes every "${entry.name}" across ${entry.vehicles} vehicle${entry.vehicles === 1 ? "" : "s"} — the schedule entry, any booked job, and every past visit that used it.`,
+    title: entry ? "Edit service name" : "Add a service name",
+    hint: entry
+      ? `Changes every "${entry.name}" across ${entry.vehicles} vehicle${entry.vehicles === 1 ? "" : "s"} if you rename it — the schedule entry, any booked job, and every past visit that used it.`
+      : "Adds a name to the list, ready to pick from before it's ever been logged.",
     fields: [
       {
         name: "name",
         label: "Name",
         type: "text",
-        value: entry.name,
+        value: entry?.name || "",
         suggestions: state.report.map((row) => row.name),
       },
+      {
+        name: "favorite",
+        label: "Favorite",
+        type: "checkbox",
+        value: entry?.favorite || false,
+        hint: "Favorites are what the service schedule's dropdown offers.",
+      },
+      {
+        name: "fitsVehicleIds",
+        label: "Applies to",
+        type: "checks",
+        value: entry?.fitsVehicleIds || [],
+        options: [...state.vehicles].sort(byVehicleName).map((vehicle) => ({ value: vehicle.id, label: vehicle.name })),
+        hint: "Pick none and it's offered for every vehicle.",
+      },
     ],
-    submitLabel: "Rename everywhere",
+    submitLabel: entry ? "Save changes" : "Add it",
     validate: (v) => (v.name ? null : "What should it be called?"),
   });
   if (!values) return;
 
-  const result = await renameServiceEverywhere(state.vehicles, entry.name, values.name);
+  const renaming = entry && normalizeJob(values.name) !== normalizeJob(entry.name);
+  const result = renaming ? await renameServiceEverywhere(state.vehicles, entry.name, values.name) : null;
+
+  await saveServiceName(entry, {
+    name: values.name,
+    favorite: !!values.favorite,
+    fitsVehicleIds: values.fitsVehicleIds || [],
+  });
+
   showToast(
-    result.vehicles
-      ? `Renamed on ${result.vehicles} vehicle${result.vehicles === 1 ? "" : "s"} — ${result.records} record${result.records === 1 ? "" : "s"} updated`
-      : "Nothing needed changing"
+    !entry
+      ? "Added"
+      : result?.vehicles
+        ? `Renamed on ${result.vehicles} vehicle${result.vehicles === 1 ? "" : "s"} — ${result.records} record${result.records === 1 ? "" : "s"} updated`
+        : "Saved"
   );
   await state.reload();
 }
@@ -638,7 +704,7 @@ async function renameServiceEverywhere(vehicles, oldName, newName) {
 function mountComingUp() {
   // Which counts have been opened, by vehicle and status. Kept here rather than
   // in the DOM so a redraw doesn't shut everything you'd opened.
-  const state = { vehicles: [], parts: [], loaded: false, expanded: new Set() };
+  const state = { vehicles: [], parts: [], serviceNames: [], loaded: false, expanded: new Set() };
 
   $app.addEventListener("click", (event) => {
     const target = event.target.closest("[data-act=toggle-group]");
@@ -702,7 +768,11 @@ async function migratePartsReservations(vehicles) {
 
 // Everything the coming-up section needs, in one pass.
 async function loadGarage() {
-  const [vehicleSnap, partSnap] = await Promise.all([getDocs(collection(db, "vehicles")), getDocs(collection(db, "parts"))]);
+  const [vehicleSnap, partSnap, nameSnap] = await Promise.all([
+    getDocs(collection(db, "vehicles")),
+    getDocs(collection(db, "parts")),
+    getDocs(collection(db, "serviceNames")),
+  ]);
 
   const vehicles = await Promise.all(
     vehicleSnap.docs.map(async (vehicleDoc) => {
@@ -727,7 +797,11 @@ async function loadGarage() {
     })
   );
 
-  return { vehicles, parts: partSnap.docs.map((d) => ({ id: d.id, ...d.data() })) };
+  return {
+    vehicles,
+    parts: partSnap.docs.map((d) => ({ id: d.id, ...d.data() })),
+    serviceNames: nameSnap.docs.map((d) => ({ id: d.id, ...d.data() })),
+  };
 }
 
 function renderComingUp(state) {
@@ -769,9 +843,9 @@ function renderComingUp(state) {
 
   if (!overdue.length && !soon.length) {
     bodyEl.innerHTML =
-      buyCard +
       `<p class="empty small">Nothing overdue or due soon. Anything further out is on
-      each vehicle's own page.</p>`;
+      each vehicle's own page.</p>` +
+      buyCard;
     return;
   }
 
@@ -809,9 +883,9 @@ function renderComingUp(state) {
       .filter(Boolean)
       .join(" · ")}. Tap a count to see the jobs; open a vehicle for their dates and mileages.</p>
 
-    ${buyCard}
-
     <div class="plan-vehicles">${sections}</div>
+
+    ${buyCard}
   `;
 }
 
@@ -1301,10 +1375,10 @@ function renderVehicleView(id) {
     vehicle: null,
     fillups: null,
     services: null,
-    // Only used to offer better suggestions and to stock the parts picker, so
-    // rendering doesn't wait on either.
-    schedule: [],
+    // Only used to stock the parts picker and offer suggestions, so rendering
+    // doesn't wait on either.
     parts: [],
+    serviceNames: [],
     showAllFillups: false,
     showHistory: false,
     combineMode: false,
@@ -1369,13 +1443,13 @@ function renderVehicleView(id) {
   );
 
   onSnapshot(
-    collection(db, "vehicles", id, "schedule"),
+    collection(db, "serviceNames"),
     (snap) => {
-      state.schedule = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      state.serviceNames = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
     },
-    // The schedule is a nicety here; if it can't be read, the suggestions are
+    // The list is a nicety here; if it can't be read, the suggestions are
     // just a little shorter.
-    (err) => console.warn("Couldn't read the service schedule", err)
+    (err) => console.warn("Couldn't read the service names list", err)
   );
 }
 
@@ -1580,13 +1654,7 @@ function serviceSuggestions(state) {
     out.push(value);
   };
 
-  [...(state.services || [])]
-    .filter((record) => record.status === "done")
-    .sort((a, b) => String(b.servicedOn || "").localeCompare(String(a.servicedOn || "")))
-    .forEach((record) => serviceItems(record).forEach((item) => add(item.title)));
-
-  (state.services || []).filter((record) => record.status !== "done").forEach((record) => add(record.title));
-  (state.schedule || []).forEach((entry) => add(entry.title));
+  serviceNameSuggestions(state.serviceNames || [], state.id).forEach(add);
   SERVICE_SUGGESTIONS.forEach(add);
   return out;
 }
@@ -2088,8 +2156,8 @@ async function openScheduleServiceForm(state, existing, odometerMiles) {
   const values = await openFormModal({
     title: existing ? "Edit scheduled service" : "Schedule service",
     hint: existing
-      ? "Set a date, a mileage, or both — whichever comes first is what the reminder goes by."
-      : "Set a date, a mileage, or both — whichever comes first is what the reminder goes by. Add a line for each job due at the same time.",
+      ? "Set a date, a mileage, both, or neither — whichever's set is what the reminder goes by."
+      : "Set a date, a mileage, both, or neither — whichever's set is what the reminder goes by. Add a line for each job due at the same time.",
     fields: [
       existing
         ? {
@@ -2147,7 +2215,6 @@ async function openScheduleServiceForm(state, existing, odometerMiles) {
     validate: (v) => {
       const titled = existing ? !!v.title : (v.titles || []).some((item) => item.title);
       if (!titled) return "What service is it?";
-      if (!v.dueOn && !v.dueOdometer) return "Add a due date, a due mileage, or both.";
       if (v.dueOdometer && !Number.isFinite(Number(v.dueOdometer))) return "That mileage doesn't look right.";
       return null;
     },
@@ -2629,7 +2696,7 @@ function renderScheduleView(id) {
   `;
 
   const bodyEl = document.getElementById("schedule-body");
-  const state = { id, vehicle: null, services: null, fillups: [], schedule: null, parts: [] };
+  const state = { id, vehicle: null, services: null, fillups: [], schedule: null, parts: [], serviceNames: [] };
 
   bodyEl.addEventListener("click", (event) => {
     const target = event.target.closest("[data-act]");
@@ -2670,6 +2737,14 @@ function renderScheduleView(id) {
     },
     // The picker is just a little shorter if this fails; nothing here depends on it.
     (err) => console.warn("Couldn't read the parts list", err)
+  );
+  onSnapshot(
+    collection(db, "serviceNames"),
+    (snap) => {
+      state.serviceNames = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    },
+    // The suggestions are just a little shorter if this fails.
+    (err) => console.warn("Couldn't read the service names list", err)
   );
 }
 
@@ -2779,7 +2854,7 @@ function handleScheduleAction(action, id, state) {
 }
 
 async function openPlanForm(state, existing) {
-  const suggestions = serviceSuggestions(state);
+  const suggestions = serviceNameSuggestions(state.serviceNames || [], state.id, { favoritesOnly: true });
 
   const values = await openFormModal({
     title: existing ? "Edit schedule entry" : "Add to the schedule",
@@ -2792,6 +2867,9 @@ async function openPlanForm(state, existing) {
         value: existing?.title || "",
         placeholder: "Oil change",
         suggestions,
+        hint: suggestions.length
+          ? undefined
+          : "Nothing's favorited yet — star a name on the Service names page to offer it here.",
       },
       {
         name: "everyMiles",
