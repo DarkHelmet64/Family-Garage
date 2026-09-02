@@ -2342,6 +2342,10 @@ async function openCompletedServiceForm(state, existing, odometerMiles, { comple
               ? folding.flatMap((record) => serviceItems(record))
               : [],
         suggestions: serviceSuggestions(state),
+        // The running total below the list is what actually gets saved as
+        // this record's cost, so it has to count labor along with the items
+        // -- otherwise it stops matching the receipt the moment there's any.
+        extraCostField: "laborCost",
         hint: combining
           ? "Everything from the records you picked, as one trip. Their costs and parts came with them — check the total before saving."
           : folding

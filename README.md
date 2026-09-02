@@ -377,9 +377,12 @@ a service done — a plain log, **Mark done**, **Log as one visit**, **Combine**
 or editing an already-done record. It's a whole-visit figure, not one more line
 item — set once for the trip, the way Shop is, rather than split across jobs
 that don't actually bill separately for the work. It's added on top of
-whatever the items list comes to, and shows on its own line ("Labor $60.00")
-alongside them wherever a visit's breakdown is shown, so the total on the right
-always matches what's itemized underneath it. **Service total**, **Total w/
+whatever the items list comes to, folded straight into the same running
+**Total** shown as you fill the sheet in — so what you see there while
+entering it already matches what's about to be saved, not just the items
+above it. Once saved it shows on its own line ("Labor $60.00") alongside the
+items wherever a visit's breakdown is shown, so the total on the right always
+matches what's itemized underneath it. **Service total**, **Total w/
 service**, and **Cost per mile w/ service** on the vehicle page all count it —
 labor is part of what a visit actually cost, same as any job on it.
 
