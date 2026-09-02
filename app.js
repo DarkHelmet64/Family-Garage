@@ -768,11 +768,19 @@ async function migratePartsReservations(vehicles) {
 
 // Everything the coming-up section needs, in one pass.
 async function loadGarage() {
-  const [vehicleSnap, partSnap, nameSnap] = await Promise.all([
+  const [vehicleSnap, partSnap] = await Promise.all([
     getDocs(collection(db, "vehicles")),
     getDocs(collection(db, "parts")),
-    getDocs(collection(db, "serviceNames")),
   ]);
+  // Service names are a nicety here -- favorites and vehicle scoping for the
+  // suggestion dropdowns -- not something Coming Up itself reads. Caught on
+  // its own so a garage whose published rules haven't caught up with this
+  // repo's firestore.rules yet still gets a working Coming Up and Service
+  // names page; it just offers plainer suggestions until they're republished.
+  const nameSnap = await getDocs(collection(db, "serviceNames")).catch((err) => {
+    console.warn("Couldn't read the service names list", err);
+    return { docs: [] };
+  });
 
   const vehicles = await Promise.all(
     vehicleSnap.docs.map(async (vehicleDoc) => {
