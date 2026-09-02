@@ -369,6 +369,23 @@ export function shelfShortages(parts) {
     .sort((a, b) => b.negative - a.negative || b.short - a.short || String(a.name).localeCompare(String(b.name)));
 }
 
+// Which vendors are worth a filter chip on the To buy list -- every distinct
+// one actually carried by something currently short, in the same worst-first
+// order shelfShortages already sorted them into, so the chips read top to
+// bottom the same way the list itself would. A part with no vendor set
+// doesn't get a chip; there's nowhere to file it.
+export function shortageVendors(shortages) {
+  const seen = new Set();
+  const vendors = [];
+  for (const need of shortages || []) {
+    if (need.vendor && !seen.has(need.vendor)) {
+      seen.add(need.vendor);
+      vendors.push(need.vendor);
+    }
+  }
+  return vendors;
+}
+
 // ---------------------------------------------------------------------------
 // The service schedule
 //

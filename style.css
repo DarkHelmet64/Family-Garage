@@ -1333,6 +1333,17 @@ input[type="file"] {
 .card.shopping { padding: 14px 16px; }
 .card.shopping .section-title { margin: 0 0 8px; }
 
+.vendor-filter { margin-bottom: 10px; }
+
+/* Same outline pill as any other small secondary button, just filled in
+   brand when it's the vendor currently narrowing the list -- the same
+   "picked" idea a checked check-chip already uses, on a plain button
+   instead of a checkbox. */
+.vendor-chip.active {
+  background: var(--brand);
+  color: white;
+}
+
 .shopping-row {
   display: flex;
   flex-wrap: wrap;
