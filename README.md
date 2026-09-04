@@ -819,3 +819,4 @@ itself is still plain HTML/CSS/JS, served as-is.
 | `firebase-config.js` | Your Firebase project's config (you fill this in). |
 | `firestore.rules` | The database rules to paste into the Firebase console. |
 | `package.json` | Just pins the Node version for local tooling — no dependencies, nothing to install. |
+| `.nvmrc` | The same Node version, for `nvm use`. |
