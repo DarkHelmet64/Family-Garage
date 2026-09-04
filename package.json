@@ -1,0 +1,9 @@
+{
+  "name": "family-garage",
+  "version": "1.0.0",
+  "private": true,
+  "description": "A vehicle log for a family's cars: fuel, MPG, and service tracking. Static HTML/CSS/JS, no build step, backed by Firebase Firestore.",
+  "engines": {
+    "node": ">=24"
+  }
+}

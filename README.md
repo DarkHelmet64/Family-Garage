@@ -797,6 +797,11 @@ npx serve .
 Then open the printed URL. Firestore reads/writes will work as soon as
 `firebase-config.js` and the Firestore rules are set up (steps above).
 
+`package.json` exists only to say which Node version local tooling (`npx
+serve`, an editor's Node integration, whatever you reach for) is expected to
+run on — Node 24+. It has no dependencies and nothing to install; the app
+itself is still plain HTML/CSS/JS, served as-is.
+
 ### What's in here
 
 | File | What it does |
@@ -813,3 +818,4 @@ Then open the printed URL. Firestore reads/writes will work as soon as
 | `ui.js` | Modals, toasts, the QR code, and the MPG chart. |
 | `firebase-config.js` | Your Firebase project's config (you fill this in). |
 | `firestore.rules` | The database rules to paste into the Firebase console. |
+| `package.json` | Just pins the Node version for local tooling — no dependencies, nothing to install. |
