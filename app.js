@@ -6,6 +6,7 @@ import {
   addDoc,
   updateDoc,
   deleteDoc,
+  getDoc,
   getDocs,
   onSnapshot,
   serverTimestamp,
@@ -163,7 +164,17 @@ function renderGarageView() {
   `;
 
   document.getElementById("more-btn").addEventListener("click", openGarageMenu);
-  mountComingUp();
+
+  // Coming up rides on this listener's own first snapshot instead of reading
+  // the vehicles collection a second time -- resolved once, from whichever
+  // fires first: real data, an empty garage, or a read error. Later live
+  // updates to the card list don't re-resolve it; Coming Up is a one-shot
+  // read, same as it's always been.
+  let resolveVehicles;
+  const firstVehiclesSnapshot = new Promise((resolve) => {
+    resolveVehicles = resolve;
+  });
+  mountComingUp(firstVehiclesSnapshot);
 
   const listEl = document.getElementById("vehicle-list");
   onSnapshot(
@@ -175,6 +186,7 @@ function renderGarageView() {
           <p class="empty">No vehicles yet.</p>
           <div class="single-action"><a class="btn" href="?new">+ Add a vehicle</a></div>
         `;
+        resolveVehicles([]);
         return;
       }
       const vehicles = [];
@@ -188,9 +200,12 @@ function renderGarageView() {
           location.search = `?vehicle=${row.dataset.id}`;
         });
       });
+
+      resolveVehicles(vehicles);
     },
     (err) => {
       listEl.innerHTML = `<p class="empty">Couldn't load your vehicles.<br /><span class="hint">${escapeHtml(err.message)}</span></p>`;
+      resolveVehicles([]);
     }
   );
 }
@@ -702,7 +717,7 @@ async function renameServiceEverywhere(vehicles, oldName, newName) {
 // and back reads it again, which is as fresh as this needs to be.
 // ---------------------------------------------------------------------------
 
-function mountComingUp() {
+function mountComingUp(vehiclesPromise) {
   // Which counts have been opened, by vehicle and status. Kept here rather than
   // in the DOM so a redraw doesn't shut everything you'd opened.
   const state = {
@@ -731,7 +746,7 @@ function mountComingUp() {
     }
   });
 
-  loadGarage()
+  loadGarage(vehiclesPromise)
     .then(async (loaded) => {
       Object.assign(state, loaded, { loaded: true });
       // Catches up anything booked before parts started reserving at
@@ -782,10 +797,15 @@ async function migratePartsReservations(vehicles) {
   return touched;
 }
 
-// Everything the coming-up section needs, in one pass.
-async function loadGarage() {
-  const [vehicleSnap, partSnap] = await Promise.all([
-    getDocs(collection(db, "vehicles")),
+// Everything the coming-up section needs, in one pass. `vehiclesPromise`,
+// when given, is the garage screen's own vehicle-list read -- already
+// underway for the cards above this section -- so Coming Up rides along on
+// that instead of reading the whole vehicles collection a second time. The
+// Service names page has no such read of its own, so it's left to fetch one.
+async function loadGarage(vehiclesPromise = null) {
+  const [vehicleDocs, partSnap] = await Promise.all([
+    vehiclesPromise ||
+      getDocs(collection(db, "vehicles")).then((snap) => snap.docs.map((d) => ({ id: d.id, ...d.data() }))),
     getDocs(collection(db, "parts")),
   ]);
   // Service names are a nicety here -- favorites and vehicle scoping for the
@@ -799,14 +819,13 @@ async function loadGarage() {
   });
 
   const vehicles = await Promise.all(
-    vehicleSnap.docs.map(async (vehicleDoc) => {
-      const id = vehicleDoc.id;
+    vehicleDocs.map(async (data) => {
+      const id = data.id;
       const [services, schedule, fillups] = await Promise.all([
         getDocs(collection(db, "vehicles", id, "services")),
         getDocs(collection(db, "vehicles", id, "schedule")),
         getDocs(collection(db, "vehicles", id, "fillups")),
       ]);
-      const data = vehicleDoc.data();
       const serviceList = services.docs.map((d) => ({ id: d.id, ...d.data() }));
       const fillupList = fillups.docs.map((d) => ({ id: d.id, ...d.data() }));
       return {
@@ -3286,16 +3305,15 @@ async function recomputeSummary(id) {
   const [fillupsSnap, servicesSnap, vehicleSnap] = await Promise.all([
     getDocs(collection(db, "vehicles", id, "fillups")),
     getDocs(collection(db, "vehicles", id, "services")),
-    getDocs(collection(db, "vehicles")),
+    getDoc(doc(db, "vehicles", id)),
   ]);
 
   const fillups = fillupsSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
   const services = servicesSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
-  const vehicleDoc = vehicleSnap.docs.find((d) => d.id === id);
-  if (!vehicleDoc) return;
+  if (!vehicleSnap.exists()) return;
 
   const { summary } = computeFuelStats(fillups);
-  const odometerMiles = currentOdometer(vehicleDoc.data(), fillups, services);
+  const odometerMiles = currentOdometer(vehicleSnap.data(), fillups, services);
   const ctx = { odometerMiles, today: new Date() };
   const open = openServices(services, ctx);
   const next = open[0] || null;
