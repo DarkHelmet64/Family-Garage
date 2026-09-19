@@ -523,11 +523,17 @@ async function handleMergeAction(state) {
 
   const winner = entries.find((row) => row.key === winnerKey);
   let recordsTouched = 0;
+  const touchedVehicleIds = new Set();
   for (const loser of entries) {
     if (loser.key === winner.key) continue;
     const result = await renameServiceEverywhere(state.vehicles, loser.name, winner.name);
     recordsTouched += result.records;
+    result.vehicleIds.forEach((id) => touchedVehicleIds.add(id));
   }
+  // Once per vehicle for the whole merge, not once per losing name folded
+  // into it -- a vehicle touched by three renames only needs its summary to
+  // reflect where it ended up, not each step along the way.
+  await Promise.all([...touchedVehicleIds].map((id) => recomputeSummary(id)));
 
   const favorite = entries.some((row) => row.favorite);
   const unrestricted = entries.some((row) => !row.fitsVehicleIds);
@@ -597,6 +603,7 @@ async function openServiceNameForm(entry, state) {
 
   const renaming = entry && normalizeJob(values.name) !== normalizeJob(entry.name);
   const result = renaming ? await renameServiceEverywhere(state.vehicles, entry.name, values.name) : null;
+  if (result) await Promise.all(result.vehicleIds.map((id) => recomputeSummary(id)));
 
   await saveServiceName(entry, {
     name: values.name,
@@ -626,8 +633,11 @@ async function openServiceNameForm(entry, state) {
 // never touched costs nothing.
 async function renameServiceEverywhere(vehicles, oldName, newName) {
   const wanted = normalizeJob(oldName);
-  let vehiclesTouched = 0;
   let recordsTouched = 0;
+  // Which vehicles actually changed -- handed back rather than recomputed
+  // here, so a caller renaming several names in one go (merging) can recompute
+  // each vehicle once for the whole batch instead of once per name.
+  const touchedVehicleIds = [];
 
   for (const vehicle of vehicles) {
     const batch = writeBatch(db);
@@ -689,12 +699,11 @@ async function renameServiceEverywhere(vehicles, oldName, newName) {
 
     if (touchedThisVehicle) {
       await batch.commit();
-      await recomputeSummary(vehicle.id);
-      vehiclesTouched += 1;
+      touchedVehicleIds.push(vehicle.id);
     }
   }
 
-  return { vehicles: vehiclesTouched, records: recordsTouched };
+  return { vehicles: touchedVehicleIds.length, records: recordsTouched, vehicleIds: touchedVehicleIds };
 }
 
 // ---------------------------------------------------------------------------
