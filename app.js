@@ -796,11 +796,17 @@ async function migratePartsReservations(vehicles) {
     for (const service of vehicle.services || []) {
       if (service.status === "done" || service.reserved) continue;
       const needed = service.partsNeeded || [];
-      await updateDoc(doc(db, "vehicles", vehicle.id, "services", service.id), { reserved: true });
+      // The shelf is adjusted before the record is marked reserved, not
+      // after -- reserved:true is what tells every future sweep (and
+      // currentlyReserved() everywhere else) this already happened, so
+      // writing that first and the shelf second would leave it permanently
+      // unreserved-but-marked-reserved if the two calls were ever split by
+      // a lost connection or a closed tab in between.
       if (needed.length) {
         await applyPartUsage([], needed);
         touched += 1;
       }
+      await updateDoc(doc(db, "vehicles", vehicle.id, "services", service.id), { reserved: true });
     }
   }
   return touched;
@@ -2564,6 +2570,27 @@ async function openCompletedServiceForm(state, existing, odometerMiles, { comple
     partsNeeded: null,
   };
 
+  // What was already reserved against this record is given back before the
+  // new list is taken off, so saving moves the shelf by the difference
+  // rather than charging it twice -- a done record's actual usage, or a
+  // still-open one's reservation, whichever this one has. Combining folds in
+  // what the merged-away records had already reserved too -- those parts
+  // left the shelf once, when each visit was first logged, and moving them
+  // onto this record isn't a second trip to the shelf. A brand new record
+  // (folding or a fresh log) has nothing of its own yet; a folded record's
+  // own reservation is released separately below, as each one comes off the
+  // list.
+  //
+  // Done before the record itself is written, not after: the record's own
+  // status and parts are what say this reservation already happened, so
+  // writing those first and the shelf second would leave it saying so
+  // without it being true if the two calls were ever split by a lost
+  // connection or a closed tab in between.
+  const partsBefore = combining
+    ? [...(existing?.parts || []), ...combining.flatMap((record) => record.parts || [])]
+    : currentlyReserved(existing);
+  await applyPartUsage(partsBefore, partsUsed);
+
   const services = collection(db, "vehicles", state.id, "services");
   let serviceId;
   if (existing) {
@@ -2575,20 +2602,6 @@ async function openCompletedServiceForm(state, existing, odometerMiles, { comple
     // rather than after saving and reopening it.
     serviceId = (await addDoc(services, { ...payload, createdAt: serverTimestamp() })).id;
   }
-  // What was already reserved against this record is given back before the
-  // new list is taken off, so saving moves the shelf by the difference
-  // rather than charging it twice -- a done record's actual usage, or a
-  // still-open one's reservation, whichever this one has. Combining folds in
-  // what the merged-away records had already reserved too -- those parts
-  // left the shelf once, when each visit was first logged, and moving them
-  // onto this record isn't a second trip to the shelf. A brand new record
-  // (folding or a fresh log) has nothing of its own yet; a folded record's
-  // own reservation is released separately below, as each one comes off the
-  // list.
-  const partsBefore = combining
-    ? [...(existing?.parts || []), ...combining.flatMap((record) => record.parts || [])]
-    : currentlyReserved(existing);
-  await applyPartUsage(partsBefore, partsUsed);
 
   const photoSaveError = await saveServicePhotos(state.id, serviceId, values.photos, {
     hadCount: existingPhotos.length,
