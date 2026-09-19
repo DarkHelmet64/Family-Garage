@@ -836,11 +836,19 @@ async function loadGarage(vehiclesPromise = null) {
   const vehicles = await Promise.all(
     vehicleDocs.map(async (data) => {
       const id = data.id;
+      // Caught per vehicle rather than as one Promise.all across every one of
+      // them -- a transient problem reading a single vehicle's own records (a
+      // network blip, a rule that hasn't propagated yet) shouldn't blank
+      // Coming Up for every other vehicle that read just fine. That vehicle
+      // simply contributes nothing to it, same as one with nothing logged.
       const [services, schedule, fillups] = await Promise.all([
         getDocs(collection(db, "vehicles", id, "services")),
         getDocs(collection(db, "vehicles", id, "schedule")),
         getDocs(collection(db, "vehicles", id, "fillups")),
-      ]);
+      ]).catch((err) => {
+        console.warn(`Couldn't read ${data.name || id}'s records`, err);
+        return [{ docs: [] }, { docs: [] }, { docs: [] }];
+      });
       const serviceList = services.docs.map((d) => ({ id: d.id, ...d.data() }));
       const fillupList = fillups.docs.map((d) => ({ id: d.id, ...d.data() }));
       return {
