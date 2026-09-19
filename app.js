@@ -523,11 +523,17 @@ async function handleMergeAction(state) {
 
   const winner = entries.find((row) => row.key === winnerKey);
   let recordsTouched = 0;
+  const touchedVehicleIds = new Set();
   for (const loser of entries) {
     if (loser.key === winner.key) continue;
     const result = await renameServiceEverywhere(state.vehicles, loser.name, winner.name);
     recordsTouched += result.records;
+    result.vehicleIds.forEach((id) => touchedVehicleIds.add(id));
   }
+  // Once per vehicle for the whole merge, not once per losing name folded
+  // into it -- a vehicle touched by three renames only needs its summary to
+  // reflect where it ended up, not each step along the way.
+  await Promise.all([...touchedVehicleIds].map((id) => recomputeSummary(id)));
 
   const favorite = entries.some((row) => row.favorite);
   const unrestricted = entries.some((row) => !row.fitsVehicleIds);
@@ -597,6 +603,7 @@ async function openServiceNameForm(entry, state) {
 
   const renaming = entry && normalizeJob(values.name) !== normalizeJob(entry.name);
   const result = renaming ? await renameServiceEverywhere(state.vehicles, entry.name, values.name) : null;
+  if (result) await Promise.all(result.vehicleIds.map((id) => recomputeSummary(id)));
 
   await saveServiceName(entry, {
     name: values.name,
@@ -626,8 +633,11 @@ async function openServiceNameForm(entry, state) {
 // never touched costs nothing.
 async function renameServiceEverywhere(vehicles, oldName, newName) {
   const wanted = normalizeJob(oldName);
-  let vehiclesTouched = 0;
   let recordsTouched = 0;
+  // Which vehicles actually changed -- handed back rather than recomputed
+  // here, so a caller renaming several names in one go (merging) can recompute
+  // each vehicle once for the whole batch instead of once per name.
+  const touchedVehicleIds = [];
 
   for (const vehicle of vehicles) {
     const batch = writeBatch(db);
@@ -689,12 +699,11 @@ async function renameServiceEverywhere(vehicles, oldName, newName) {
 
     if (touchedThisVehicle) {
       await batch.commit();
-      await recomputeSummary(vehicle.id);
-      vehiclesTouched += 1;
+      touchedVehicleIds.push(vehicle.id);
     }
   }
 
-  return { vehicles: vehiclesTouched, records: recordsTouched };
+  return { vehicles: touchedVehicleIds.length, records: recordsTouched, vehicleIds: touchedVehicleIds };
 }
 
 // ---------------------------------------------------------------------------
@@ -787,11 +796,17 @@ async function migratePartsReservations(vehicles) {
     for (const service of vehicle.services || []) {
       if (service.status === "done" || service.reserved) continue;
       const needed = service.partsNeeded || [];
-      await updateDoc(doc(db, "vehicles", vehicle.id, "services", service.id), { reserved: true });
+      // The shelf is adjusted before the record is marked reserved, not
+      // after -- reserved:true is what tells every future sweep (and
+      // currentlyReserved() everywhere else) this already happened, so
+      // writing that first and the shelf second would leave it permanently
+      // unreserved-but-marked-reserved if the two calls were ever split by
+      // a lost connection or a closed tab in between.
       if (needed.length) {
         await applyPartUsage([], needed);
         touched += 1;
       }
+      await updateDoc(doc(db, "vehicles", vehicle.id, "services", service.id), { reserved: true });
     }
   }
   return touched;
@@ -821,11 +836,19 @@ async function loadGarage(vehiclesPromise = null) {
   const vehicles = await Promise.all(
     vehicleDocs.map(async (data) => {
       const id = data.id;
+      // Caught per vehicle rather than as one Promise.all across every one of
+      // them -- a transient problem reading a single vehicle's own records (a
+      // network blip, a rule that hasn't propagated yet) shouldn't blank
+      // Coming Up for every other vehicle that read just fine. That vehicle
+      // simply contributes nothing to it, same as one with nothing logged.
       const [services, schedule, fillups] = await Promise.all([
         getDocs(collection(db, "vehicles", id, "services")),
         getDocs(collection(db, "vehicles", id, "schedule")),
         getDocs(collection(db, "vehicles", id, "fillups")),
-      ]);
+      ]).catch((err) => {
+        console.warn(`Couldn't read ${data.name || id}'s records`, err);
+        return [{ docs: [] }, { docs: [] }, { docs: [] }];
+      });
       const serviceList = services.docs.map((d) => ({ id: d.id, ...d.data() }));
       const fillupList = fillups.docs.map((d) => ({ id: d.id, ...d.data() }));
       return {
@@ -2555,6 +2578,27 @@ async function openCompletedServiceForm(state, existing, odometerMiles, { comple
     partsNeeded: null,
   };
 
+  // What was already reserved against this record is given back before the
+  // new list is taken off, so saving moves the shelf by the difference
+  // rather than charging it twice -- a done record's actual usage, or a
+  // still-open one's reservation, whichever this one has. Combining folds in
+  // what the merged-away records had already reserved too -- those parts
+  // left the shelf once, when each visit was first logged, and moving them
+  // onto this record isn't a second trip to the shelf. A brand new record
+  // (folding or a fresh log) has nothing of its own yet; a folded record's
+  // own reservation is released separately below, as each one comes off the
+  // list.
+  //
+  // Done before the record itself is written, not after: the record's own
+  // status and parts are what say this reservation already happened, so
+  // writing those first and the shelf second would leave it saying so
+  // without it being true if the two calls were ever split by a lost
+  // connection or a closed tab in between.
+  const partsBefore = combining
+    ? [...(existing?.parts || []), ...combining.flatMap((record) => record.parts || [])]
+    : currentlyReserved(existing);
+  await applyPartUsage(partsBefore, partsUsed);
+
   const services = collection(db, "vehicles", state.id, "services");
   let serviceId;
   if (existing) {
@@ -2566,20 +2610,6 @@ async function openCompletedServiceForm(state, existing, odometerMiles, { comple
     // rather than after saving and reopening it.
     serviceId = (await addDoc(services, { ...payload, createdAt: serverTimestamp() })).id;
   }
-  // What was already reserved against this record is given back before the
-  // new list is taken off, so saving moves the shelf by the difference
-  // rather than charging it twice -- a done record's actual usage, or a
-  // still-open one's reservation, whichever this one has. Combining folds in
-  // what the merged-away records had already reserved too -- those parts
-  // left the shelf once, when each visit was first logged, and moving them
-  // onto this record isn't a second trip to the shelf. A brand new record
-  // (folding or a fresh log) has nothing of its own yet; a folded record's
-  // own reservation is released separately below, as each one comes off the
-  // list.
-  const partsBefore = combining
-    ? [...(existing?.parts || []), ...combining.flatMap((record) => record.parts || [])]
-    : currentlyReserved(existing);
-  await applyPartUsage(partsBefore, partsUsed);
 
   const photoSaveError = await saveServicePhotos(state.id, serviceId, values.photos, {
     hadCount: existingPhotos.length,
