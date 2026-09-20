@@ -827,6 +827,26 @@ publicly. (The repo being public is fine — your data lives in Firebase, not in
 the repo. The Firebase config in `firebase-config.js` is meant to be public;
 Firestore rules, not that config, are what control access.)
 
+## Working offline
+
+Firestore's own local cache is turned on, so the app keeps working with no
+signal — which is the usual case standing next to a car. Whatever's already
+been loaded stays readable, and anything logged offline is queued and sent
+the moment a connection comes back. Nothing to turn on; it's on by default,
+and a browser that can't do it (private browsing, a very old one) just falls
+back to needing a connection, the same as before this existed.
+
+## Backing up your data
+
+**More → ⬇️ Export data**, on the garage screen, downloads everything as one
+JSON file: every vehicle and its services, schedule and fill-ups, the parts
+shelf, the purchase log, and service names. Worth doing before a risky change
+to the Firestore rules, or just now and again, since [there's no
+password](#security-note) standing between this data and a mistake. Receipt
+photos aren't included — fetching every service's own photos would multiply
+the reads a lot for what's usually the least essential thing to have
+offline, and they'd make the file large.
+
 ## Local development
 
 No build step is required. Any static file server works, e.g.:
@@ -838,10 +858,34 @@ npx serve .
 Then open the printed URL. Firestore reads/writes will work as soon as
 `firebase-config.js` and the Firestore rules are set up (steps above).
 
-`package.json` exists only to say which Node version local tooling (`npx
-serve`, an editor's Node integration, whatever you reach for) is expected to
-run on — Node 24+. It has no dependencies and nothing to install; the app
-itself is still plain HTML/CSS/JS, served as-is.
+`package.json` pins the Node version local tooling (`npx serve`, an editor's
+Node integration, whatever you reach for) is expected to run on — Node 24+.
+The app itself is still plain HTML/CSS/JS with no build step, served as-is;
+the one dependency it lists (Playwright) is only for the test suite below,
+never loaded by the app itself.
+
+### Running the tests
+
+```bash
+npm install              # once, to pull in Playwright
+npx playwright install chromium   # once, to fetch a browser for it to drive
+npm test                 # everything
+npm run test:unit        # just the fast, pure-function tests
+npm run test:e2e         # just the browser tests
+```
+
+`tests/unit/` tests the pure functions in `stats.js` directly — no browser,
+no Firestore, just inputs and outputs. `tests/e2e/` drives the real app in a
+real (headless) browser, with every Firestore call routed to an in-memory
+fake instead of a real project — so the suite runs offline, for free, and
+never touches real data. `tests/fixtures/` holds those fakes, seeded with a
+small garage; `tests/helpers/serve.mjs` is the shared setup (a local static
+server plus the browser plus that routing) every e2e test starts from.
+`tests/run.mjs` is what `npm test` actually runs — it finds every test file
+and prints one pass/fail summary rather than one per file.
+
+A GitHub Actions workflow (`.github/workflows/test.yml`) runs the whole suite
+on every push and pull request.
 
 ### What's in here
 
@@ -859,5 +903,7 @@ itself is still plain HTML/CSS/JS, served as-is.
 | `ui.js` | Modals, toasts, the QR code, and the MPG chart. |
 | `firebase-config.js` | Your Firebase project's config (you fill this in). |
 | `firestore.rules` | The database rules to paste into the Firebase console. |
-| `package.json` | Just pins the Node version for local tooling — no dependencies, nothing to install. |
+| `package.json` | Pins the Node version, and Playwright for the test suite — nothing the app itself loads. |
 | `.nvmrc` | The same Node version, for `nvm use`. |
+| `tests/` | The test suite — see [Running the tests](#running-the-tests). |
+| `.github/workflows/test.yml` | Runs the test suite on every push and pull request. |

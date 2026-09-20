@@ -1,6 +1,9 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-app.js";
 import {
   getFirestore,
+  initializeFirestore,
+  persistentLocalCache,
+  persistentMultipleTabManager,
   collection,
   doc,
   addDoc,
@@ -61,7 +64,21 @@ import {
 } from "./stats.js";
 
 const app = initializeApp(firebaseConfig);
-const db = getFirestore(app);
+
+// Cached locally so the app can still read what it already has -- and queue
+// up writes -- with no signal, which is the usual case standing next to a
+// car. Multiple tabs share one cache rather than fighting over it; a browser
+// that can't do IndexedDB at all (private browsing, very old Safari) just
+// gets memory-only, the same as before this existed.
+let db;
+try {
+  db = initializeFirestore(app, {
+    localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }),
+  });
+} catch (err) {
+  console.warn("Offline persistence isn't available here -- falling back to memory-only.", err);
+  db = getFirestore(app);
+}
 
 const $app = document.getElementById("app");
 
@@ -287,13 +304,89 @@ function openGarageMenu() {
     options: [
       { value: "new", label: "+ Add a vehicle" },
       { value: "names", label: "🏷️ Service names" },
+      { value: "export", label: "⬇️ Export data" },
       { value: "qr", label: "Show QR code" },
     ],
   }).then((choice) => {
     if (choice === "new") location.search = "?new";
     else if (choice === "names") location.search = "?names";
+    else if (choice === "export") exportAllData().catch(reportActionFailure);
     else if (choice === "qr") openQrModal(siteUrl(), "Scan to open Family Garage");
   });
+}
+
+// ---------------------------------------------------------------------------
+// Export: everything in the database, as one JSON file to keep as a backup.
+//
+// Receipt photos are left out -- fetching every service's own photos
+// subcollection would multiply the reads by a lot for what's usually the
+// least essential thing to have offline, and a data URL apiece would make
+// the file huge. Everything else -- vehicles, their services, schedule and
+// fill-ups, the parts shelf, the purchase log, service names -- is included.
+// ---------------------------------------------------------------------------
+
+async function exportAllData() {
+  const [vehiclesSnap, partsSnap, purchasesSnap, namesSnap] = await Promise.all([
+    getDocs(collection(db, "vehicles")),
+    getDocs(collection(db, "parts")),
+    getDocs(collection(db, "purchases")),
+    getDocs(collection(db, "serviceNames")),
+  ]);
+
+  const vehicles = await Promise.all(
+    vehiclesSnap.docs.map(async (vehicleDoc) => {
+      const [servicesSnap, scheduleSnap, fillupsSnap] = await Promise.all([
+        getDocs(collection(db, "vehicles", vehicleDoc.id, "services")),
+        getDocs(collection(db, "vehicles", vehicleDoc.id, "schedule")),
+        getDocs(collection(db, "vehicles", vehicleDoc.id, "fillups")),
+      ]).catch((err) => {
+        // One vehicle's read trouble shouldn't lose every other vehicle's
+        // export -- it's noted on the vehicle itself instead.
+        console.warn(`Couldn't fully read ${vehicleDoc.id} for export`, err);
+        return null;
+      });
+      const rows = (snap) => (snap ? snap.docs.map((d) => ({ id: d.id, ...d.data() })) : []);
+      return {
+        id: vehicleDoc.id,
+        ...vehicleDoc.data(),
+        services: rows(servicesSnap),
+        schedule: rows(scheduleSnap),
+        fillups: rows(fillupsSnap),
+        ...(servicesSnap ? {} : { exportIncomplete: true }),
+      };
+    })
+  );
+
+  const data = {
+    exportedAt: new Date().toISOString(),
+    vehicles,
+    parts: partsSnap.docs.map((d) => ({ id: d.id, ...d.data() })),
+    purchases: purchasesSnap.docs.map((d) => ({ id: d.id, ...d.data() })),
+    serviceNames: namesSnap.docs.map((d) => ({ id: d.id, ...d.data() })),
+  };
+
+  const blob = new Blob([JSON.stringify(jsonSafe(data), null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `family-garage-export-${todayISO()}.json`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+  showToast("Export downloaded");
+}
+
+// Firestore hands back its own Timestamp objects for serverTimestamp()
+// fields, which don't read as plain data. Anything shaped like one becomes
+// the ISO string it represents; everything else passes through untouched.
+function jsonSafe(value) {
+  if (value === null || typeof value !== "object") return value;
+  if (typeof value.toDate === "function") return value.toDate().toISOString();
+  if (Array.isArray(value)) return value.map(jsonSafe);
+  const out = {};
+  for (const [key, val] of Object.entries(value)) out[key] = jsonSafe(val);
+  return out;
 }
 
 // ---------------------------------------------------------------------------
