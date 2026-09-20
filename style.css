@@ -1213,6 +1213,14 @@ input[type="file"] {
 .item-row select[data-part-id] { flex: 1 1 auto; min-width: 0; }
 .item-row input[data-part-qty] { flex: 0 0 78px; }
 
+/* Which unit a part-used row's quantity box is asking for -- only shown once
+   a part is picked, since there's nothing to convert to before then. */
+.part-qty-unit {
+  flex: 0 0 auto;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
 /* A history row available to pick for combining, and once picked. */
 .row-check {
   align-self: center;

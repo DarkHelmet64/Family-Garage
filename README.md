@@ -594,6 +594,20 @@ Booking out more than you had leaves a negative count. That's kept rather than
 quietly clamped — it means the count was wrong, and the row says so — and a
 recount puts it right.
 
+### Buying in one unit, using in another
+
+Some things are bought bigger than they're used — a jug of coolant counted in
+**gal** but dispensed by the **oz**, a case counted in **qt** but topped off a
+few ounces at a time. Give a part a **used in** unit on the shelf page and say
+how many of it make one you're counted in (128 oz to a gal, say), and every
+parts picker switches that row's quantity box to the smaller unit — type "12"
+for 12 oz and the shelf still comes down by the right fraction of a gallon.
+The warning under a row that's asking for more than there is speaks in that
+same smaller unit, too.
+
+Leave **used in** blank — the default — and a part works exactly as it always
+has: bought and used in the one unit, nothing to convert.
+
 ### What the parts cost, on the record
 
 A service sheet works out what the parts you've booked cost, from each one's

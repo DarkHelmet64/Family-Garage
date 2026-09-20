@@ -1301,6 +1301,27 @@ async function openPartForm(existing, state) {
         placeholder: "4",
       },
       {
+        name: "useUnit",
+        label: "Used in (optional)",
+        type: "select",
+        half: true,
+        value: existing?.useUnit || "",
+        options: [{ value: "", label: "Same as counted in" }, ...PART_UNITS.map((unit) => ({ value: unit, label: unit }))],
+        hint: "Pick this when it's dispensed smaller than it's bought -- oil by the quart out of a case, coolant by the ounce out of a jug.",
+      },
+      {
+        name: "unitsPerBuyUnit",
+        label: "Conversion (optional)",
+        type: "number",
+        step: "0.01",
+        inputmode: "decimal",
+        min: 0,
+        half: true,
+        value: existing?.unitsPerBuyUnit != null ? String(existing.unitsPerBuyUnit) : "",
+        placeholder: "128",
+        hint: "How many of that unit make one you're counted in -- 128 oz to a gal, 4 qt to a gal.",
+      },
+      {
         name: "minQuantity",
         label: "Tell me below",
         type: "number",
@@ -1338,6 +1359,8 @@ async function openPartForm(existing, state) {
     validate: (v) => {
       if (!v.name) return "What is it called?";
       if (v.quantity && !Number.isFinite(Number(v.quantity))) return "That quantity doesn't look like a number.";
+      if (v.useUnit && v.useUnit === v.unit) return "Pick a different unit than what it's counted in, or leave this blank.";
+      if (v.useUnit && !(Number(v.unitsPerBuyUnit) > 0)) return "Say how many of that unit make one you're counted in.";
       return null;
     },
   });
@@ -1367,6 +1390,8 @@ async function openPartForm(existing, state) {
     partNumber: values.partNumber || null,
     unit: values.unit || "each",
     quantity: values.quantity ? Number(values.quantity) : 0,
+    useUnit: values.useUnit || null,
+    unitsPerBuyUnit: values.useUnit ? Number(values.unitsPerBuyUnit) : null,
     minQuantity: values.minQuantity ? Number(values.minQuantity) : null,
     unitCostCents: values.unitCost ? dollarsToCents(values.unitCost) : null,
     notes: values.notes || null,
