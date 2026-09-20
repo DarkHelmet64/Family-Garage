@@ -1223,10 +1223,63 @@ function adjustPartQuantity(partId, delta) {
   return updateDoc(doc(db, "parts", partId), { quantity: increment(delta), updatedAt: serverTimestamp() });
 }
 
+// What "start from an existing part" loads into the rest of the sheet --
+// everything about the product, not the batch. Quantity is left alone: it's
+// how much of this new batch is on the shelf, not something to copy. An
+// empty `part` (picking "start blank" after having picked something else)
+// clears every field back the same way, so switching templates never leaves
+// the last one's values behind.
+function fillPartTemplate(overlay, part) {
+  const set = (name, value) => {
+    const input = overlay.querySelector(`[data-field="${name}"]`);
+    if (input) input.value = value;
+  };
+  set("name", part?.name || "");
+  set("brand", part?.brand || "");
+  set("category", part?.category || "");
+  set("partNumber", part?.partNumber || "");
+  set("modelNumber", part?.modelNumber || "");
+  set("size", part?.size || "");
+  set("vendor", part?.vendor || "");
+  set("unit", part?.unit || "each");
+  set("useUnit", part?.useUnit || "");
+  set("unitsPerBuyUnit", part?.unitsPerBuyUnit != null ? String(part.unitsPerBuyUnit) : "");
+  set("minQuantity", part?.minQuantity != null ? String(part.minQuantity) : "");
+  set("unitCost", part?.unitCostCents ? (part.unitCostCents / 100).toFixed(2) : "");
+  set("notes", part?.notes || "");
+  const fits = new Set(part?.fitsVehicleIds || []);
+  overlay.querySelectorAll('[data-check="fitsVehicleIds"]').forEach((box) => {
+    box.checked = fits.has(box.value);
+  });
+}
+
 async function openPartForm(existing, state) {
+  // Adding something you've had before shouldn't mean retyping its brand,
+  // model, unit and cost from scratch -- picking one here loads the rest of
+  // the sheet from it. Only offered when adding fresh: editing already has
+  // its own part to start from, and there's nothing to copy from on the
+  // first part ever added.
+  const copyFromField =
+    !existing && (state.parts || []).length
+      ? {
+          name: "copyFrom",
+          label: "Start from an existing part (optional)",
+          type: "select",
+          value: "",
+          options: [
+            { value: "", label: "— start blank —" },
+            ...[...state.parts]
+              .sort((a, b) => a.name.localeCompare(b.name))
+              .map((part) => ({ value: part.id, label: part.name })),
+          ],
+          onChange: (partId, overlay) => fillPartTemplate(overlay, state.parts.find((part) => part.id === partId)),
+        }
+      : null;
+
   const values = await openFormModal({
     title: existing ? "Edit part" : "Add a part",
     fields: [
+      copyFromField,
       { name: "name", label: "Part or supply", type: "text", value: existing?.name || "", placeholder: "Oil filter" },
       {
         name: "brand",
@@ -1353,7 +1406,7 @@ async function openPartForm(existing, state) {
         hint: "Pick none and it counts as fitting anything — which is what a case of oil or a box of rags is.",
       },
       { name: "notes", label: "Notes (optional)", type: "text", value: existing?.notes || "", placeholder: "Bought two at a time" },
-    ],
+    ].filter(Boolean),
     submitLabel: existing ? "Save changes" : "Add it",
     destructive: existing ? { label: "Remove from the parts list" } : null,
     validate: (v) => {

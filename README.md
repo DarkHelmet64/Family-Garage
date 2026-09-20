@@ -559,6 +559,16 @@ Give things categories and the shelf sorts itself into them, named categories
 first and anything without one at the end. Categorise nothing and it stays the
 one flat list it always was.
 
+**+ Add a part** opens with **Start from an existing part (optional)** at the
+top — pick one you've already got and everything but **On the shelf** loads
+from it: brand, category, numbers, size, vendor, unit, conversion, cost, the
+low-stock floor, notes, which vehicles it fits. Handy for a second batch of
+something you're restocking, a bigger or smaller container of the same thing,
+or just a near-identical item you'd rather tweak than type from nothing —
+what you save is always a new, separate item on the shelf, never a change to
+the one you copied. Leave it on **— start blank —**, the default, and the
+sheet behaves exactly as it always has.
+
 ### Which vehicles a part fits
 
 **Fits** is a row of chips, one per vehicle. Pick none — the default — and the
