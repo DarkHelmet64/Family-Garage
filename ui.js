@@ -394,6 +394,19 @@ function partOptionsHtml(catalogue, selectedId, vehicleId) {
   return placeholder + offered.map(optionHtml).join("");
 }
 
+// A part can be bought in one unit and used in a smaller one -- a jug of
+// coolant counted in "gal" but topped off by the "oz". Usage rows are always
+// entered and shown in this unit; only the buy-unit amount goes on the
+// record, so the shelf math on the far side never has to know a conversion
+// happened.
+const usageUnit = (part) =>
+  part.useUnit && part.useUnit !== part.unit && Number(part.unitsPerBuyUnit) > 0
+    ? { unit: part.useUnit, perBuyUnit: Number(part.unitsPerBuyUnit) }
+    : { unit: part.unit || "each", perBuyUnit: 1 };
+const toBuyUnits = (part, usageQty) => Number(usageQty) / usageUnit(part).perBuyUnit;
+const toUsageUnits = (part, buyQty) => Number(buyQty) * usageUnit(part).perBuyUnit;
+const round2 = (n) => Math.round(n * 100) / 100;
+
 function bindPartsField(overlay, field) {
   const rowsEl = overlay.querySelector(`[data-parts-rows="${field.name}"]`);
   const addButton = overlay.querySelector(`[data-parts-add="${field.name}"]`);
@@ -407,13 +420,19 @@ function bindPartsField(overlay, field) {
   // its own figures from ones typed by hand.
   const written = new Map();
 
-  let rows = (field.value || []).map((used) => ({
-    partId: used.partId || "",
-    quantity: used.quantity != null ? String(used.quantity) : "1",
-    // The saved job name, resolved to a line once the lines are known.
-    forJob: used.forJob || "",
-    lineId: null,
-  }));
+  // Saved rows hold a buy-unit quantity; shown and edited here in whichever
+  // unit the part is actually dispensed in.
+  let rows = (field.value || []).map((used) => {
+    const part = catalogue.find((candidate) => candidate.id === used.partId) || {};
+    const shown = used.quantity != null ? round2(toUsageUnits(part, used.quantity)) : null;
+    return {
+      partId: used.partId || "",
+      quantity: shown != null ? String(shown) : "1",
+      // The saved job name, resolved to a line once the lines are known.
+      forJob: used.forJob || "",
+      lineId: null,
+    };
+  });
 
   const sync = () => {
     const previous = rows;
@@ -434,8 +453,9 @@ function bindPartsField(overlay, field) {
   // priced, and rows without a price simply don't show one.
   const rowCostCents = (row) => {
     const part = catalogue.find((candidate) => candidate.id === row.partId);
-    const quantity = Number(row.quantity);
-    if (!part || !part.unitCostCents || !Number.isFinite(quantity)) return null;
+    if (!part || !part.unitCostCents) return null;
+    const quantity = toBuyUnits(part, row.quantity);
+    if (!Number.isFinite(quantity)) return null;
     return part.unitCostCents * quantity;
   };
 
@@ -504,10 +524,11 @@ function bindPartsField(overlay, field) {
   const shortfall = (row) => {
     const part = catalogue.find((candidate) => candidate.id === row.partId);
     if (!part) return null;
-    const wanted = Number(row.quantity);
+    const wanted = toBuyUnits(part, row.quantity);
     const have = Number(part.quantity) || 0;
     if (!Number.isFinite(wanted) || wanted <= have) return null;
-    return `only ${have} ${part.unit || "each"} on the shelf`;
+    const usage = usageUnit(part);
+    return `only ${round2(have * usage.perBuyUnit)} ${usage.unit} on the shelf`;
   };
 
   const render = () => {
@@ -522,6 +543,7 @@ function bindPartsField(overlay, field) {
             </select>
             <input data-part-qty type="number" step="0.01" min="0" inputmode="decimal"
                    placeholder="Qty" value="${escapeHtml(row.quantity)}" />
+            ${row.partId ? `<span class="part-qty-unit">${escapeHtml(usageUnit(catalogue.find((candidate) => candidate.id === row.partId) || {}).unit)}</span>` : ""}
             <button type="button" class="item-remove" data-part-remove="${index}" title="Remove">×</button>
           </div>
           ${jobPickHtml(row, lines)}
@@ -621,7 +643,7 @@ function bindPartsField(overlay, field) {
             // Which job it went on, by name -- the only handle that survives
             // the sheet being closed and opened again.
             forJob: job ? job.title : null,
-            quantity: Number(row.quantity),
+            quantity: round2(toBuyUnits(part, row.quantity)),
           };
         });
     },
