@@ -559,6 +559,33 @@ Give things categories and the shelf sorts itself into them, named categories
 first and anything without one at the end. Categorise nothing and it stays the
 one flat list it always was.
 
+**+ Add a part** opens with **Start from an existing part (optional)** at the
+top — pick one you've already got and everything but **On the shelf** loads
+from it: brand, category, numbers, size, vendor, unit, conversion, cost, the
+low-stock floor, notes, which vehicles it fits. Handy for a second batch of
+something you're restocking, a bigger or smaller container of the same thing,
+or just a near-identical item you'd rather tweak than type from nothing —
+what you save is always a new, separate item on the shelf, never a change to
+the one you copied. Leave it on **— start blank —**, the default, and the
+sheet behaves exactly as it always has.
+
+### Purchases
+
+The 🧾 button on any shelf row is **Log a purchase** — how many, what it cost
+in total, who it was bought from, and the date, defaulting to today. Saving
+adds that quantity onto the shelf, the same as typing it into **On the
+shelf** would, and keeps a dated entry of the purchase itself: what the part
+was called and counted in at the time, so a later rename or removal doesn't
+change what the log says was bought. **+ Add a part** does the same
+automatically for a brand-new item's starting count, so the first batch
+shows up in the log without a second step.
+
+**🧾 Purchases**, next to **+ Add a part**, lists every logged purchase,
+newest first, with a running total of what's been spent. Tap one to delete
+it — the quantity comes back off the shelf, same as it went on. The **+**/**−**
+buttons and editing a part's own **On the shelf** figure are still there for a
+quick recount and don't touch the log; only **Log a purchase** does.
+
 ### Which vehicles a part fits
 
 **Fits** is a row of chips, one per vehicle. Pick none — the default — and the
@@ -800,6 +827,39 @@ publicly. (The repo being public is fine — your data lives in Firebase, not in
 the repo. The Firebase config in `firebase-config.js` is meant to be public;
 Firestore rules, not that config, are what control access.)
 
+## Working offline
+
+Firestore's own local cache is turned on, so the app keeps working with no
+signal — which is the usual case standing next to a car. Whatever's already
+been loaded stays readable, and anything logged offline is queued and sent
+the moment a connection comes back. Nothing to turn on; it's on by default,
+and a browser that can't do it (private browsing, a very old one) just falls
+back to needing a connection, the same as before this existed.
+
+A service worker separately caches the app itself — the page, its scripts and
+stylesheet — so it loads instantly on a repeat visit and survives losing
+signal partway through loading, not just after. It updates itself quietly in
+the background; there's nothing to manage.
+
+## Installing it like an app
+
+The site has a manifest and icon, so a phone's browser offers **Add to Home
+Screen** (Android: the browser menu; iPhone: the Share sheet). Installed, it
+opens in its own window with no address bar, the same as any other app —
+handy standing at the car, one tap from the home screen rather than a
+bookmark to dig for.
+
+## Backing up your data
+
+**More → ⬇️ Export data**, on the garage screen, downloads everything as one
+JSON file: every vehicle and its services, schedule and fill-ups, the parts
+shelf, the purchase log, and service names. Worth doing before a risky change
+to the Firestore rules, or just now and again, since [there's no
+password](#security-note) standing between this data and a mistake. Receipt
+photos aren't included — fetching every service's own photos would multiply
+the reads a lot for what's usually the least essential thing to have
+offline, and they'd make the file large.
+
 ## Local development
 
 No build step is required. Any static file server works, e.g.:
@@ -811,10 +871,34 @@ npx serve .
 Then open the printed URL. Firestore reads/writes will work as soon as
 `firebase-config.js` and the Firestore rules are set up (steps above).
 
-`package.json` exists only to say which Node version local tooling (`npx
-serve`, an editor's Node integration, whatever you reach for) is expected to
-run on — Node 24+. It has no dependencies and nothing to install; the app
-itself is still plain HTML/CSS/JS, served as-is.
+`package.json` pins the Node version local tooling (`npx serve`, an editor's
+Node integration, whatever you reach for) is expected to run on — Node 24+.
+The app itself is still plain HTML/CSS/JS with no build step, served as-is;
+the one dependency it lists (Playwright) is only for the test suite below,
+never loaded by the app itself.
+
+### Running the tests
+
+```bash
+npm install              # once, to pull in Playwright
+npx playwright install chromium   # once, to fetch a browser for it to drive
+npm test                 # everything
+npm run test:unit        # just the fast, pure-function tests
+npm run test:e2e         # just the browser tests
+```
+
+`tests/unit/` tests the pure functions in `stats.js` directly — no browser,
+no Firestore, just inputs and outputs. `tests/e2e/` drives the real app in a
+real (headless) browser, with every Firestore call routed to an in-memory
+fake instead of a real project — so the suite runs offline, for free, and
+never touches real data. `tests/fixtures/` holds those fakes, seeded with a
+small garage; `tests/helpers/serve.mjs` is the shared setup (a local static
+server plus the browser plus that routing) every e2e test starts from.
+`tests/run.mjs` is what `npm test` actually runs — it finds every test file
+and prints one pass/fail summary rather than one per file.
+
+A GitHub Actions workflow (`.github/workflows/test.yml`) runs the whole suite
+on every push and pull request.
 
 ### What's in here
 
@@ -830,7 +914,12 @@ itself is still plain HTML/CSS/JS, served as-is.
 | `csv.js` | A CSV reader, for the "just export it as CSV" path. |
 | `format.js` | Formatting money, miles, gallons, and dates. |
 | `ui.js` | Modals, toasts, the QR code, and the MPG chart. |
+| `manifest.json` | Name, icon and display mode for **Add to Home Screen**. |
+| `sw.js` | The service worker that caches the app shell for a fast, offline-tolerant load. |
+| `icons/` | The app icon: one SVG source, plus 192px/512px PNGs rendered from it for installers that want a raster. |
 | `firebase-config.js` | Your Firebase project's config (you fill this in). |
 | `firestore.rules` | The database rules to paste into the Firebase console. |
-| `package.json` | Just pins the Node version for local tooling — no dependencies, nothing to install. |
+| `package.json` | Pins the Node version, and Playwright for the test suite — nothing the app itself loads. |
 | `.nvmrc` | The same Node version, for `nvm use`. |
+| `tests/` | The test suite — see [Running the tests](#running-the-tests). |
+| `.github/workflows/test.yml` | Runs the test suite on every push and pull request. |

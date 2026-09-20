@@ -1,7 +1,11 @@
-import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-app.js";
+import { initializeApp } from "https://www.gstatic.com/firebasejs/12.19.0/firebase-app.js";
 import {
   getFirestore,
+  initializeFirestore,
+  persistentLocalCache,
+  persistentMultipleTabManager,
   collection,
+  collectionGroup,
   doc,
   addDoc,
   updateDoc,
@@ -12,7 +16,7 @@ import {
   serverTimestamp,
   writeBatch,
   increment,
-} from "https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore.js";
+} from "https://www.gstatic.com/firebasejs/12.19.0/firebase-firestore.js";
 import { firebaseConfig } from "./firebase-config.js";
 
 import {
@@ -61,7 +65,32 @@ import {
 } from "./stats.js";
 
 const app = initializeApp(firebaseConfig);
-const db = getFirestore(app);
+
+// Cached locally so the app can still read what it already has -- and queue
+// up writes -- with no signal, which is the usual case standing next to a
+// car. Multiple tabs share one cache rather than fighting over it; a browser
+// that can't do IndexedDB at all (private browsing, very old Safari) just
+// gets memory-only, the same as before this existed.
+let db;
+try {
+  db = initializeFirestore(app, {
+    localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }),
+  });
+} catch (err) {
+  console.warn("Offline persistence isn't available here -- falling back to memory-only.", err);
+  db = getFirestore(app);
+}
+
+// A relative path, not "/sw.js" -- this can be hosted at a subpath (GitHub
+// Pages serves a repo at yourname.github.io/family-garage/), and a rooted
+// path would ask for a scope the page isn't allowed to claim there. Nothing
+// here waits on this; it's purely a repeat-visit speed and offline-shell
+// optimization, never a requirement to run.
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("sw.js").catch((err) => console.warn("Service worker registration failed", err));
+  });
+}
 
 const $app = document.getElementById("app");
 
@@ -70,6 +99,7 @@ const vehicleId = params.get("vehicle");
 const isNewVehiclePage = params.has("new");
 const isSchedulePage = params.has("schedule");
 const isPartsPage = params.has("parts");
+const isPurchasesPage = params.has("purchases");
 const isNamesPage = params.has("names");
 
 // Common services, offered as a datalist so the same wording gets reused across
@@ -102,6 +132,8 @@ function route() {
     renderNewVehicleView();
   } else if (isPartsPage) {
     renderPartsView();
+  } else if (isPurchasesPage) {
+    renderPurchasesView();
   } else if (isNamesPage) {
     renderServiceNamesView();
   } else if (vehicleId && isSchedulePage) {
@@ -284,13 +316,89 @@ function openGarageMenu() {
     options: [
       { value: "new", label: "+ Add a vehicle" },
       { value: "names", label: "🏷️ Service names" },
+      { value: "export", label: "⬇️ Export data" },
       { value: "qr", label: "Show QR code" },
     ],
   }).then((choice) => {
     if (choice === "new") location.search = "?new";
     else if (choice === "names") location.search = "?names";
+    else if (choice === "export") exportAllData().catch(reportActionFailure);
     else if (choice === "qr") openQrModal(siteUrl(), "Scan to open Family Garage");
   });
+}
+
+// ---------------------------------------------------------------------------
+// Export: everything in the database, as one JSON file to keep as a backup.
+//
+// Receipt photos are left out -- fetching every service's own photos
+// subcollection would multiply the reads by a lot for what's usually the
+// least essential thing to have offline, and a data URL apiece would make
+// the file huge. Everything else -- vehicles, their services, schedule and
+// fill-ups, the parts shelf, the purchase log, service names -- is included.
+// ---------------------------------------------------------------------------
+
+async function exportAllData() {
+  const [vehiclesSnap, partsSnap, purchasesSnap, namesSnap] = await Promise.all([
+    getDocs(collection(db, "vehicles")),
+    getDocs(collection(db, "parts")),
+    getDocs(collection(db, "purchases")),
+    getDocs(collection(db, "serviceNames")),
+  ]);
+
+  const vehicles = await Promise.all(
+    vehiclesSnap.docs.map(async (vehicleDoc) => {
+      const [servicesSnap, scheduleSnap, fillupsSnap] = await Promise.all([
+        getDocs(collection(db, "vehicles", vehicleDoc.id, "services")),
+        getDocs(collection(db, "vehicles", vehicleDoc.id, "schedule")),
+        getDocs(collection(db, "vehicles", vehicleDoc.id, "fillups")),
+      ]).catch((err) => {
+        // One vehicle's read trouble shouldn't lose every other vehicle's
+        // export -- it's noted on the vehicle itself instead.
+        console.warn(`Couldn't fully read ${vehicleDoc.id} for export`, err);
+        return null;
+      });
+      const rows = (snap) => (snap ? snap.docs.map((d) => ({ id: d.id, ...d.data() })) : []);
+      return {
+        id: vehicleDoc.id,
+        ...vehicleDoc.data(),
+        services: rows(servicesSnap),
+        schedule: rows(scheduleSnap),
+        fillups: rows(fillupsSnap),
+        ...(servicesSnap ? {} : { exportIncomplete: true }),
+      };
+    })
+  );
+
+  const data = {
+    exportedAt: new Date().toISOString(),
+    vehicles,
+    parts: partsSnap.docs.map((d) => ({ id: d.id, ...d.data() })),
+    purchases: purchasesSnap.docs.map((d) => ({ id: d.id, ...d.data() })),
+    serviceNames: namesSnap.docs.map((d) => ({ id: d.id, ...d.data() })),
+  };
+
+  const blob = new Blob([JSON.stringify(jsonSafe(data), null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `family-garage-export-${todayISO()}.json`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+  showToast("Export downloaded");
+}
+
+// Firestore hands back its own Timestamp objects for serverTimestamp()
+// fields, which don't read as plain data. Anything shaped like one becomes
+// the ISO string it represents; everything else passes through untouched.
+function jsonSafe(value) {
+  if (value === null || typeof value !== "object") return value;
+  if (typeof value.toDate === "function") return value.toDate().toISOString();
+  if (Array.isArray(value)) return value.map(jsonSafe);
+  const out = {};
+  for (const [key, val] of Object.entries(value)) out[key] = jsonSafe(val);
+  return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -817,11 +925,39 @@ async function migratePartsReservations(vehicles) {
 // underway for the cards above this section -- so Coming Up rides along on
 // that instead of reading the whole vehicles collection a second time. The
 // Service names page has no such read of its own, so it's left to fetch one.
+//
+// services/schedule/fillups are read as three collection-group queries --
+// one each, covering every vehicle in the garage at once -- rather than
+// fanned out three-per-vehicle. That's the difference between a garage of 20
+// cars costing roughly 60 reads or 3 every time this section loads. Grouping
+// the results back by vehicle relies on nothing but each doc's own path,
+// which names its parent: any "vehicles/{id}/services" doc's second segment
+// is its vehicle's id, whichever vehicle that happens to be.
+//
+// The tradeoff against the old per-vehicle fan-out: a failure now isolates
+// to one whole COLLECTION across the garage (fillups denied for everyone)
+// rather than to one VEHICLE (fillups denied for just that one) -- coarser,
+// but the realistic failure this guards against is a rule that hasn't been
+// (re)published, which was never going to discriminate between two vehicles
+// reading the same collection anyway. The three collection-group reads are
+// still independent of each other: one failing still leaves the other two.
 async function loadGarage(vehiclesPromise = null) {
-  const [vehicleDocs, partSnap] = await Promise.all([
+  const [vehicleDocs, partSnap, servicesSnap, scheduleSnap, fillupsSnap] = await Promise.all([
     vehiclesPromise ||
       getDocs(collection(db, "vehicles")).then((snap) => snap.docs.map((d) => ({ id: d.id, ...d.data() }))),
     getDocs(collection(db, "parts")),
+    getDocs(collectionGroup(db, "services")).catch((err) => {
+      console.warn("Couldn't read services across the garage", err);
+      return { docs: [] };
+    }),
+    getDocs(collectionGroup(db, "schedule")).catch((err) => {
+      console.warn("Couldn't read schedules across the garage", err);
+      return { docs: [] };
+    }),
+    getDocs(collectionGroup(db, "fillups")).catch((err) => {
+      console.warn("Couldn't read fill-ups across the garage", err);
+      return { docs: [] };
+    }),
   ]);
   // Service names are a nicety here -- favorites and vehicle scoping for the
   // suggestion dropdowns -- not something Coming Up itself reads. Caught on
@@ -833,35 +969,38 @@ async function loadGarage(vehiclesPromise = null) {
     return { docs: [] };
   });
 
-  const vehicles = await Promise.all(
-    vehicleDocs.map(async (data) => {
-      const id = data.id;
-      // Caught per vehicle rather than as one Promise.all across every one of
-      // them -- a transient problem reading a single vehicle's own records (a
-      // network blip, a rule that hasn't propagated yet) shouldn't blank
-      // Coming Up for every other vehicle that read just fine. That vehicle
-      // simply contributes nothing to it, same as one with nothing logged.
-      const [services, schedule, fillups] = await Promise.all([
-        getDocs(collection(db, "vehicles", id, "services")),
-        getDocs(collection(db, "vehicles", id, "schedule")),
-        getDocs(collection(db, "vehicles", id, "fillups")),
-      ]).catch((err) => {
-        console.warn(`Couldn't read ${data.name || id}'s records`, err);
-        return [{ docs: [] }, { docs: [] }, { docs: [] }];
-      });
-      const serviceList = services.docs.map((d) => ({ id: d.id, ...d.data() }));
-      const fillupList = fillups.docs.map((d) => ({ id: d.id, ...d.data() }));
-      return {
-        id,
-        name: data.name,
-        year: data.year ?? null,
-        odometerMiles: currentOdometer(data, fillupList, serviceList),
-        services: serviceList,
-        schedule: schedule.docs.map((d) => ({ id: d.id, ...d.data() })),
-        fillups: fillupList,
-      };
-    })
-  );
+  // A collection-group doc's own ref.path always has the vehicle id as its
+  // second segment -- "vehicles/{id}/services/{docId}" (or, without the doc
+  // id on some fakes, "vehicles/{id}/services") -- regardless of which of
+  // those two shapes a given SDK or test fixture returns.
+  const vehicleIdOf = (docSnap) => docSnap.ref.path.split("/")[1];
+  const byVehicle = (snap) => {
+    const map = new Map();
+    for (const docSnap of snap.docs) {
+      const id = vehicleIdOf(docSnap);
+      if (!map.has(id)) map.set(id, []);
+      map.get(id).push({ id: docSnap.id, ...docSnap.data() });
+    }
+    return map;
+  };
+  const servicesByVehicle = byVehicle(servicesSnap);
+  const scheduleByVehicle = byVehicle(scheduleSnap);
+  const fillupsByVehicle = byVehicle(fillupsSnap);
+
+  const vehicles = vehicleDocs.map((data) => {
+    const id = data.id;
+    const serviceList = servicesByVehicle.get(id) || [];
+    const fillupList = fillupsByVehicle.get(id) || [];
+    return {
+      id,
+      name: data.name,
+      year: data.year ?? null,
+      odometerMiles: currentOdometer(data, fillupList, serviceList),
+      services: serviceList,
+      schedule: scheduleByVehicle.get(id) || [],
+      fillups: fillupList,
+    };
+  });
 
   return {
     vehicles,
@@ -1060,7 +1199,10 @@ function renderPartsView() {
     <a class="back-link" href="./">&larr; Garage</a>
     <div class="page-head">
       <h1><span class="emoji">🔩</span>Parts &amp; supplies</h1>
-      <button class="secondary small" data-act="add-part">+ Add a part</button>
+      <div class="page-head-actions">
+        <button class="secondary small" data-act="view-purchases">🧾 Purchases</button>
+        <button class="secondary small" data-act="add-part">+ Add a part</button>
+      </div>
     </div>
     <p class="hint" id="parts-intro"></p>
     <div id="parts-list"><p class="loading">Loading…</p></div>
@@ -1194,6 +1336,7 @@ function partRowHtml(part, vehicles = []) {
         <span class="part-qty ${negative ? "negative" : low ? "low" : ""}">${escapeHtml(formatQuantity(part))}</span>
         ${negative ? `<span class="row-meta">more booked out than the shelf held — worth a recount</span>` : ""}
         <div class="row-actions">
+          <button class="ghost" data-act="log-purchase" data-id="${part.id}" title="Log a purchase">🧾</button>
           <button class="ghost" data-act="part-minus" data-id="${part.id}" title="Take one off the shelf">−</button>
           <button class="ghost" data-act="part-plus" data-id="${part.id}" title="Put one back">+</button>
         </div>
@@ -1212,6 +1355,13 @@ function handlePartsAction(action, id, state) {
       return adjustPartQuantity(id, 1);
     case "part-minus":
       return adjustPartQuantity(id, -1);
+    case "log-purchase": {
+      const part = state.parts.find((candidate) => candidate.id === id);
+      return part ? openPurchaseForm(part, state) : null;
+    }
+    case "view-purchases":
+      location.search = "?purchases";
+      return null;
     default:
       return null;
   }
@@ -1223,10 +1373,152 @@ function adjustPartQuantity(partId, delta) {
   return updateDoc(doc(db, "parts", partId), { quantity: increment(delta), updatedAt: serverTimestamp() });
 }
 
+// ---------------------------------------------------------------------------
+// Purchases
+//
+// A dated log of what's actually been bought, separate from the shelf's own
+// quantity/cost -- which only ever say what's true right now. What the name,
+// unit and vendor were at the time are copied onto the entry rather than
+// looked up from the part each time it's read, the same reasoning as a
+// service record's own parts list: renaming or removing the part later
+// shouldn't change what the log says was bought.
+// ---------------------------------------------------------------------------
+
+async function recordPurchase(part, payload) {
+  await addDoc(collection(db, "purchases"), {
+    partId: part.id,
+    partName: part.name,
+    quantity: payload.quantity,
+    unit: part.unit || "each",
+    totalCents: payload.totalCents,
+    unitCostCents: payload.totalCents && payload.quantity ? Math.round(payload.totalCents / payload.quantity) : null,
+    vendor: payload.vendor || null,
+    purchasedOn: payload.purchasedOn,
+    notes: payload.notes || null,
+    createdAt: serverTimestamp(),
+  });
+}
+
+// The shelf moves first and the log second -- if the log write then fails,
+// the shelf is still correctly stocked, just missing its record, rather than
+// a logged purchase that never actually landed on the shelf.
+async function logPartPurchase(part, payload) {
+  await updateDoc(doc(db, "parts", part.id), { quantity: increment(payload.quantity), updatedAt: serverTimestamp() });
+  await recordPurchase(part, payload);
+}
+
+async function openPurchaseForm(part, state) {
+  const values = await openFormModal({
+    title: `Log a purchase`,
+    hint: `Adds to ${part.name}'s shelf count and keeps a dated record of what it cost.`,
+    fields: [
+      { name: "purchasedOn", label: "Date", type: "date", half: true, value: todayISO() },
+      {
+        name: "quantity",
+        label: `Quantity (${part.unit || "each"})`,
+        type: "number",
+        step: "0.01",
+        min: 0,
+        inputmode: "decimal",
+        half: true,
+        placeholder: "4",
+      },
+      {
+        name: "totalCost",
+        label: "Total cost (optional)",
+        type: "number",
+        step: "0.01",
+        min: 0,
+        inputmode: "decimal",
+        half: true,
+        placeholder: "45.99",
+      },
+      {
+        name: "vendor",
+        label: "Bought from (optional)",
+        type: "text",
+        half: true,
+        value: part.vendor || "",
+        suggestions: usedValues(state.parts, "vendor"),
+      },
+      { name: "notes", label: "Notes (optional)", type: "text", placeholder: "On sale" },
+    ],
+    submitLabel: "Log it",
+    validate: (v) => {
+      if (!(Number(v.quantity) > 0)) return "How many did you buy?";
+      if (v.totalCost && !Number.isFinite(Number(v.totalCost))) return "That cost doesn't look like a number.";
+      return null;
+    },
+  });
+  if (!values) return;
+
+  await logPartPurchase(part, {
+    quantity: Number(values.quantity),
+    totalCents: values.totalCost ? dollarsToCents(values.totalCost) : null,
+    vendor: values.vendor || null,
+    purchasedOn: values.purchasedOn,
+    notes: values.notes || null,
+  });
+  showToast("Purchase logged");
+}
+
+// What "start from an existing part" loads into the rest of the sheet --
+// everything about the product, not the batch. Quantity is left alone: it's
+// how much of this new batch is on the shelf, not something to copy. An
+// empty `part` (picking "start blank" after having picked something else)
+// clears every field back the same way, so switching templates never leaves
+// the last one's values behind.
+function fillPartTemplate(overlay, part) {
+  const set = (name, value) => {
+    const input = overlay.querySelector(`[data-field="${name}"]`);
+    if (input) input.value = value;
+  };
+  set("name", part?.name || "");
+  set("brand", part?.brand || "");
+  set("category", part?.category || "");
+  set("partNumber", part?.partNumber || "");
+  set("modelNumber", part?.modelNumber || "");
+  set("size", part?.size || "");
+  set("vendor", part?.vendor || "");
+  set("unit", part?.unit || "each");
+  set("useUnit", part?.useUnit || "");
+  set("unitsPerBuyUnit", part?.unitsPerBuyUnit != null ? String(part.unitsPerBuyUnit) : "");
+  set("minQuantity", part?.minQuantity != null ? String(part.minQuantity) : "");
+  set("unitCost", part?.unitCostCents ? (part.unitCostCents / 100).toFixed(2) : "");
+  set("notes", part?.notes || "");
+  const fits = new Set(part?.fitsVehicleIds || []);
+  overlay.querySelectorAll('[data-check="fitsVehicleIds"]').forEach((box) => {
+    box.checked = fits.has(box.value);
+  });
+}
+
 async function openPartForm(existing, state) {
+  // Adding something you've had before shouldn't mean retyping its brand,
+  // model, unit and cost from scratch -- picking one here loads the rest of
+  // the sheet from it. Only offered when adding fresh: editing already has
+  // its own part to start from, and there's nothing to copy from on the
+  // first part ever added.
+  const copyFromField =
+    !existing && (state.parts || []).length
+      ? {
+          name: "copyFrom",
+          label: "Start from an existing part (optional)",
+          type: "select",
+          value: "",
+          options: [
+            { value: "", label: "— start blank —" },
+            ...[...state.parts]
+              .sort((a, b) => a.name.localeCompare(b.name))
+              .map((part) => ({ value: part.id, label: part.name })),
+          ],
+          onChange: (partId, overlay) => fillPartTemplate(overlay, state.parts.find((part) => part.id === partId)),
+        }
+      : null;
+
   const values = await openFormModal({
     title: existing ? "Edit part" : "Add a part",
     fields: [
+      copyFromField,
       { name: "name", label: "Part or supply", type: "text", value: existing?.name || "", placeholder: "Oil filter" },
       {
         name: "brand",
@@ -1353,7 +1645,7 @@ async function openPartForm(existing, state) {
         hint: "Pick none and it counts as fitting anything — which is what a case of oil or a box of rags is.",
       },
       { name: "notes", label: "Notes (optional)", type: "text", value: existing?.notes || "", placeholder: "Bought two at a time" },
-    ],
+    ].filter(Boolean),
     submitLabel: existing ? "Save changes" : "Add it",
     destructive: existing ? { label: "Remove from the parts list" } : null,
     validate: (v) => {
@@ -1398,9 +1690,128 @@ async function openPartForm(existing, state) {
     updatedAt: serverTimestamp(),
   };
 
-  if (existing) await updateDoc(doc(db, "parts", existing.id), payload);
-  else await addDoc(collection(db, "parts"), { ...payload, createdAt: serverTimestamp() });
+  if (existing) {
+    await updateDoc(doc(db, "parts", existing.id), payload);
+  } else {
+    const ref = await addDoc(collection(db, "parts"), { ...payload, createdAt: serverTimestamp() });
+    // The starting count on a brand-new part is itself a purchase -- log it
+    // the same way restocking one later does, just without a second shelf
+    // adjustment, since addDoc above already set the quantity directly.
+    if (payload.quantity > 0) {
+      await recordPurchase(
+        { id: ref.id, name: payload.name, unit: payload.unit },
+        {
+          quantity: payload.quantity,
+          totalCents: payload.unitCostCents ? payload.unitCostCents * payload.quantity : null,
+          vendor: payload.vendor,
+          purchasedOn: todayISO(),
+          notes: null,
+        }
+      );
+    }
+  }
   showToast(existing ? "Part updated" : "Added to the shelf");
+}
+
+// ---------------------------------------------------------------------------
+// Purchases view: every logged purchase, newest first
+// ---------------------------------------------------------------------------
+
+function renderPurchasesView() {
+  $app.innerHTML = `
+    <a class="back-link" href="?parts">&larr; Parts &amp; supplies</a>
+    <h1><span class="emoji">🧾</span>Purchases</h1>
+    <p class="hint">Every purchase logged from the parts shelf, newest first. Log one from any
+    part there to start keeping a record of what you've bought.</p>
+    <p class="hint" id="purchases-intro"></p>
+    <div id="purchases-list"><p class="loading">Loading…</p></div>
+  `;
+
+  const state = { purchases: [] };
+  $app.addEventListener("click", (event) => {
+    const target = event.target.closest("[data-act]");
+    if (!target) return;
+    Promise.resolve(handlePurchasesAction(target.dataset.act, target.dataset.id, state)).catch(reportActionFailure);
+  });
+
+  const listEl = document.getElementById("purchases-list");
+  onSnapshot(
+    collection(db, "purchases"),
+    (snap) => {
+      state.purchases = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      state.purchases.sort((a, b) => String(b.purchasedOn || "").localeCompare(String(a.purchasedOn || "")));
+      drawPurchases(listEl, state);
+    },
+    (err) => {
+      listEl.innerHTML = `<p class="empty">Couldn't load the purchase log.<br /><span class="hint">${escapeHtml(err.message)}</span></p>`;
+    }
+  );
+}
+
+function drawPurchases(listEl, state) {
+  const introEl = document.getElementById("purchases-intro");
+  if (!state.purchases.length) {
+    introEl.textContent = "";
+    listEl.innerHTML = `<p class="empty small">Nothing logged yet.</p>`;
+    return;
+  }
+  const totalCents = state.purchases.reduce((sum, purchase) => sum + (purchase.totalCents || 0), 0);
+  introEl.textContent = `${state.purchases.length} purchase${state.purchases.length === 1 ? "" : "s"}${
+    totalCents ? ` · ${formatUSD(totalCents)} total` : ""
+  }`;
+  listEl.innerHTML = `<div class="list">${state.purchases.map(purchaseRowHtml).join("")}</div>`;
+}
+
+function purchaseRowHtml(purchase) {
+  const meta = [purchase.vendor ? `from ${purchase.vendor}` : null, purchase.unitCostCents ? `${formatUSD(purchase.unitCostCents)} each` : null]
+    .filter(Boolean)
+    .join(" · ");
+  return `
+    <div class="row purchase-row tappable" data-act="delete-purchase" data-id="${purchase.id}">
+      <div class="row-main">
+        <span class="row-title-text">${escapeHtml(purchase.partName || "Part")}</span>
+        <span class="row-meta">${escapeHtml(formatISO(purchase.purchasedOn))}${meta ? ` · ${escapeHtml(meta)}` : ""}</span>
+        ${purchase.notes ? `<span class="row-note">${escapeHtml(purchase.notes)}</span>` : ""}
+      </div>
+      <div class="row-side">
+        <span class="part-qty">${escapeHtml(String(purchase.quantity))} ${escapeHtml(purchase.unit || "each")}</span>
+        ${purchase.totalCents ? `<span class="row-meta">${escapeHtml(formatUSD(purchase.totalCents))}</span>` : ""}
+      </div>
+    </div>
+  `;
+}
+
+function handlePurchasesAction(action, id, state) {
+  switch (action) {
+    case "delete-purchase":
+      return confirmDeletePurchase(state.purchases.find((purchase) => purchase.id === id));
+    default:
+      return null;
+  }
+}
+
+async function confirmDeletePurchase(purchase) {
+  if (!purchase) return;
+  const confirmed = await openConfirmModal({
+    title: "Delete this purchase?",
+    message: `${purchase.quantity} ${purchase.unit || "each"} of ${purchase.partName} comes back off the shelf, and this log entry is gone for good.`,
+    confirmLabel: "Delete",
+    danger: true,
+  });
+  if (!confirmed) return;
+  await deletePurchase(purchase);
+  showToast("Purchase deleted");
+}
+
+async function deletePurchase(purchase) {
+  try {
+    await updateDoc(doc(db, "parts", purchase.partId), { quantity: increment(-purchase.quantity), updatedAt: serverTimestamp() });
+  } catch (err) {
+    // The part itself may have been removed from the shelf since -- the log
+    // entry still goes, there's just no shelf left to put it back onto.
+    console.warn("Couldn't reverse the shelf for a deleted purchase", err);
+  }
+  await deleteDoc(doc(db, "purchases", purchase.id));
 }
 
 // ---------------------------------------------------------------------------

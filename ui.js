@@ -188,6 +188,15 @@ export function openFormModal({ title, hint, fields, submitLabel = "Save", valid
       if (input) attachSuggest(input, field.suggestions);
     }
 
+    // A field naming its own onChange gets to react live as it changes -- used
+    // to load another field's picked value into the rest of the sheet, without
+    // the form framework itself knowing why.
+    for (const field of fields) {
+      if (!field.onChange) continue;
+      const input = overlay.querySelector(`[data-field="${field.name}"]`);
+      if (input) input.addEventListener("change", () => field.onChange(input.value, overlay));
+    }
+
     const readValues = () => {
       const values = {};
       for (const field of fields) {
@@ -243,8 +252,14 @@ export function openFormModal({ title, hint, fields, submitLabel = "Save", valid
       });
     });
 
-    const first = overlay.querySelector("[data-field]");
-    if (first && first.type !== "checkbox") {
+    // A select skips the same way a checkbox does -- typing a letter to start
+    // filling in the field after it would otherwise jump the select to
+    // whichever option starts with that letter, firing anything bound to its
+    // own change along the way.
+    const first = [...overlay.querySelectorAll("[data-field]")].find(
+      (el) => el.type !== "checkbox" && el.tagName !== "SELECT"
+    );
+    if (first) {
       // Focus the first field without its suggestions springing open: a sheet
       // that opens with a dropdown already covering it hides the form before
       // anyone has asked for help.
