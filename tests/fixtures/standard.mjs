@@ -32,7 +32,10 @@ const DATA = {
       avgMpg: 22.4,
       odometerMiles: 98450,
       startOdometerMiles: 90000,
-      statsVersion: 999,
+      // Matches stats.js's own STATS_VERSION -- already fresh, so loading
+      // the garage doesn't also trigger a recomputeSummary() sweep with its
+      // own separate per-vehicle reads alongside loadGarage()'s.
+      statsVersion: 2,
     },
     {
       id: "v2",
@@ -43,7 +46,7 @@ const DATA = {
       avgMpg: 19.1,
       odometerMiles: 45300,
       startOdometerMiles: 39000,
-      statsVersion: 999,
+      statsVersion: 2,
     },
   ],
   "vehicles/v1/services": [
@@ -127,6 +130,14 @@ const docSnapFor = (path, id) => {
   const row = rows(path).find((r) => r.id === id);
   return { exists: () => !!row, id, data: () => (row ? { ...row } : null) };
 };
+// A collection-group query matches every stored path whose last segment is
+// that name, at any depth -- "vehicles/v1/services", "vehicles/v2/services",
+// and so on, all in one pass, the same as Firestore's own collectionGroup().
+const groupSnapFor = (name) => {
+  const matchingPaths = Object.keys(store).filter((p) => Array.isArray(store[p]) && p.split("/").pop() === name);
+  const docs = matchingPaths.flatMap((p) => rows(p).map((r) => ({ id: r.id, data: () => ({ ...r }), ref: { path: p, id: r.id } })));
+  return { empty: !docs.length, docs, forEach: (fn) => docs.forEach(fn) };
+};
 const notify = () => listeners.forEach((l) => (l.type === "doc" ? l.cb(docSnapFor(l.path, l.id)) : l.cb(snapFor(l.path))));
 
 // A handful of actions in the app navigate by setting location.search, which
@@ -169,8 +180,13 @@ export const initializeFirestore = () => ({});
 export const persistentLocalCache = (opts) => opts;
 export const persistentMultipleTabManager = () => ({});
 export const collection = (_db, ...s) => ({ kind: "collection", path: s.join("/") });
+export const collectionGroup = (_db, name) => ({ kind: "collectionGroup", name });
 export const doc = (_db, ...s) => ({ kind: "doc", path: s.slice(0, -1).join("/"), id: s[s.length - 1] });
 export const getDocs = async (ref) => {
+  if (ref.kind === "collectionGroup") {
+    count("getDocs", `collectionGroup:${ref.name}`);
+    return groupSnapFor(ref.name);
+  }
   count("getDocs", ref.path);
   return snapFor(ref.path);
 };

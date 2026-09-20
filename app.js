@@ -1,10 +1,11 @@
-import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-app.js";
+import { initializeApp } from "https://www.gstatic.com/firebasejs/12.19.0/firebase-app.js";
 import {
   getFirestore,
   initializeFirestore,
   persistentLocalCache,
   persistentMultipleTabManager,
   collection,
+  collectionGroup,
   doc,
   addDoc,
   updateDoc,
@@ -15,7 +16,7 @@ import {
   serverTimestamp,
   writeBatch,
   increment,
-} from "https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore.js";
+} from "https://www.gstatic.com/firebasejs/12.19.0/firebase-firestore.js";
 import { firebaseConfig } from "./firebase-config.js";
 
 import {
@@ -78,6 +79,17 @@ try {
 } catch (err) {
   console.warn("Offline persistence isn't available here -- falling back to memory-only.", err);
   db = getFirestore(app);
+}
+
+// A relative path, not "/sw.js" -- this can be hosted at a subpath (GitHub
+// Pages serves a repo at yourname.github.io/family-garage/), and a rooted
+// path would ask for a scope the page isn't allowed to claim there. Nothing
+// here waits on this; it's purely a repeat-visit speed and offline-shell
+// optimization, never a requirement to run.
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("sw.js").catch((err) => console.warn("Service worker registration failed", err));
+  });
 }
 
 const $app = document.getElementById("app");
@@ -913,11 +925,39 @@ async function migratePartsReservations(vehicles) {
 // underway for the cards above this section -- so Coming Up rides along on
 // that instead of reading the whole vehicles collection a second time. The
 // Service names page has no such read of its own, so it's left to fetch one.
+//
+// services/schedule/fillups are read as three collection-group queries --
+// one each, covering every vehicle in the garage at once -- rather than
+// fanned out three-per-vehicle. That's the difference between a garage of 20
+// cars costing roughly 60 reads or 3 every time this section loads. Grouping
+// the results back by vehicle relies on nothing but each doc's own path,
+// which names its parent: any "vehicles/{id}/services" doc's second segment
+// is its vehicle's id, whichever vehicle that happens to be.
+//
+// The tradeoff against the old per-vehicle fan-out: a failure now isolates
+// to one whole COLLECTION across the garage (fillups denied for everyone)
+// rather than to one VEHICLE (fillups denied for just that one) -- coarser,
+// but the realistic failure this guards against is a rule that hasn't been
+// (re)published, which was never going to discriminate between two vehicles
+// reading the same collection anyway. The three collection-group reads are
+// still independent of each other: one failing still leaves the other two.
 async function loadGarage(vehiclesPromise = null) {
-  const [vehicleDocs, partSnap] = await Promise.all([
+  const [vehicleDocs, partSnap, servicesSnap, scheduleSnap, fillupsSnap] = await Promise.all([
     vehiclesPromise ||
       getDocs(collection(db, "vehicles")).then((snap) => snap.docs.map((d) => ({ id: d.id, ...d.data() }))),
     getDocs(collection(db, "parts")),
+    getDocs(collectionGroup(db, "services")).catch((err) => {
+      console.warn("Couldn't read services across the garage", err);
+      return { docs: [] };
+    }),
+    getDocs(collectionGroup(db, "schedule")).catch((err) => {
+      console.warn("Couldn't read schedules across the garage", err);
+      return { docs: [] };
+    }),
+    getDocs(collectionGroup(db, "fillups")).catch((err) => {
+      console.warn("Couldn't read fill-ups across the garage", err);
+      return { docs: [] };
+    }),
   ]);
   // Service names are a nicety here -- favorites and vehicle scoping for the
   // suggestion dropdowns -- not something Coming Up itself reads. Caught on
@@ -929,35 +969,38 @@ async function loadGarage(vehiclesPromise = null) {
     return { docs: [] };
   });
 
-  const vehicles = await Promise.all(
-    vehicleDocs.map(async (data) => {
-      const id = data.id;
-      // Caught per vehicle rather than as one Promise.all across every one of
-      // them -- a transient problem reading a single vehicle's own records (a
-      // network blip, a rule that hasn't propagated yet) shouldn't blank
-      // Coming Up for every other vehicle that read just fine. That vehicle
-      // simply contributes nothing to it, same as one with nothing logged.
-      const [services, schedule, fillups] = await Promise.all([
-        getDocs(collection(db, "vehicles", id, "services")),
-        getDocs(collection(db, "vehicles", id, "schedule")),
-        getDocs(collection(db, "vehicles", id, "fillups")),
-      ]).catch((err) => {
-        console.warn(`Couldn't read ${data.name || id}'s records`, err);
-        return [{ docs: [] }, { docs: [] }, { docs: [] }];
-      });
-      const serviceList = services.docs.map((d) => ({ id: d.id, ...d.data() }));
-      const fillupList = fillups.docs.map((d) => ({ id: d.id, ...d.data() }));
-      return {
-        id,
-        name: data.name,
-        year: data.year ?? null,
-        odometerMiles: currentOdometer(data, fillupList, serviceList),
-        services: serviceList,
-        schedule: schedule.docs.map((d) => ({ id: d.id, ...d.data() })),
-        fillups: fillupList,
-      };
-    })
-  );
+  // A collection-group doc's own ref.path always has the vehicle id as its
+  // second segment -- "vehicles/{id}/services/{docId}" (or, without the doc
+  // id on some fakes, "vehicles/{id}/services") -- regardless of which of
+  // those two shapes a given SDK or test fixture returns.
+  const vehicleIdOf = (docSnap) => docSnap.ref.path.split("/")[1];
+  const byVehicle = (snap) => {
+    const map = new Map();
+    for (const docSnap of snap.docs) {
+      const id = vehicleIdOf(docSnap);
+      if (!map.has(id)) map.set(id, []);
+      map.get(id).push({ id: docSnap.id, ...docSnap.data() });
+    }
+    return map;
+  };
+  const servicesByVehicle = byVehicle(servicesSnap);
+  const scheduleByVehicle = byVehicle(scheduleSnap);
+  const fillupsByVehicle = byVehicle(fillupsSnap);
+
+  const vehicles = vehicleDocs.map((data) => {
+    const id = data.id;
+    const serviceList = servicesByVehicle.get(id) || [];
+    const fillupList = fillupsByVehicle.get(id) || [];
+    return {
+      id,
+      name: data.name,
+      year: data.year ?? null,
+      odometerMiles: currentOdometer(data, fillupList, serviceList),
+      services: serviceList,
+      schedule: scheduleByVehicle.get(id) || [],
+      fillups: fillupList,
+    };
+  });
 
   return {
     vehicles,

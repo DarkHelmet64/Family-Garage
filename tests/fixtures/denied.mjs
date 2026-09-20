@@ -1,10 +1,16 @@
-// Same two vehicles as standard.mjs's dashboard-relevant data, except one
-// read -- v2's fillups -- always throws, the same way Firestore rejects a
-// read the security rules don't allow. Both vehicles carry a pre-computed
-// `nextService` on their own document (the same field recomputeSummary()
-// keeps fresh in production), so the garage card list needs nothing from
-// the denied subcollection to show correctly; only a page that reads
-// subcollections directly (Coming Up) is actually exercised by the denial.
+// Same two vehicles as standard.mjs's dashboard-relevant data, except the
+// fill-ups collection-group query always throws, the same way Firestore
+// rejects a read its security rules don't allow -- e.g. the collection-group
+// rule for "fillups" not having been (re)published yet. Both vehicles carry
+// a pre-computed `nextService` on their own document (the same field
+// recomputeSummary() keeps fresh in production), so the garage card list
+// needs nothing from fillups to show correctly; only Coming Up, which reads
+// services/schedule/fillups as three collection-group queries, is actually
+// exercised by the denial. Fill-ups barely feed Coming Up's own math (just
+// one of several sources for a vehicle's current odometer reading), so this
+// is deliberately a low-stakes collection to deny: the interesting claim
+// isn't "the app tolerates missing mileage data", it's "one of the three
+// collection-group reads failing doesn't take the other two down with it".
 const pad = (n) => String(n).padStart(2, "0");
 const iso = (offsetDays) => {
   const d = new Date();
@@ -46,7 +52,7 @@ const DATA = {
   "vehicles/v2/fillups": [],
 };
 
-const DENIED_PATH = "vehicles/v2/fillups";
+const DENIED_GROUP = "fillups";
 
 const rows = (path) => (store[path] = Array.isArray(store[path]) ? store[path] : []);
 const snapFor = (path) => {
@@ -56,6 +62,11 @@ const snapFor = (path) => {
 const docSnapFor = (path, id) => {
   const row = rows(path).find((r) => r.id === id);
   return { exists: () => !!row, id, data: () => (row ? { ...row } : null) };
+};
+const groupSnapFor = (name) => {
+  const matchingPaths = Object.keys(store).filter((p) => Array.isArray(store[p]) && p.split("/").pop() === name);
+  const docs = matchingPaths.flatMap((p) => rows(p).map((r) => ({ id: r.id, data: () => ({ ...r }), ref: { path: p, id: r.id } })));
+  return { empty: !docs.length, docs, forEach: (fn) => docs.forEach(fn) };
 };
 const store = DATA;
 
@@ -67,9 +78,13 @@ export const initializeFirestore = () => ({});
 export const persistentLocalCache = (opts) => opts;
 export const persistentMultipleTabManager = () => ({});
 export const collection = (_db, ...s) => ({ kind: "collection", path: s.join("/") });
+export const collectionGroup = (_db, name) => ({ kind: "collectionGroup", name });
 export const doc = (_db, ...s) => ({ kind: "doc", path: s.slice(0, -1).join("/"), id: s[s.length - 1] });
 export const getDocs = async (ref) => {
-  if (ref.path === DENIED_PATH) throw new Error("Missing or insufficient permissions.");
+  if (ref.kind === "collectionGroup") {
+    if (ref.name === DENIED_GROUP) throw new Error("Missing or insufficient permissions.");
+    return groupSnapFor(ref.name);
+  }
   return snapFor(ref.path);
 };
 export const getDoc = async (ref) => docSnapFor(ref.path, ref.id);

@@ -836,6 +836,19 @@ the moment a connection comes back. Nothing to turn on; it's on by default,
 and a browser that can't do it (private browsing, a very old one) just falls
 back to needing a connection, the same as before this existed.
 
+A service worker separately caches the app itself — the page, its scripts and
+stylesheet — so it loads instantly on a repeat visit and survives losing
+signal partway through loading, not just after. It updates itself quietly in
+the background; there's nothing to manage.
+
+## Installing it like an app
+
+The site has a manifest and icon, so a phone's browser offers **Add to Home
+Screen** (Android: the browser menu; iPhone: the Share sheet). Installed, it
+opens in its own window with no address bar, the same as any other app —
+handy standing at the car, one tap from the home screen rather than a
+bookmark to dig for.
+
 ## Backing up your data
 
 **More → ⬇️ Export data**, on the garage screen, downloads everything as one
@@ -901,6 +914,9 @@ on every push and pull request.
 | `csv.js` | A CSV reader, for the "just export it as CSV" path. |
 | `format.js` | Formatting money, miles, gallons, and dates. |
 | `ui.js` | Modals, toasts, the QR code, and the MPG chart. |
+| `manifest.json` | Name, icon and display mode for **Add to Home Screen**. |
+| `sw.js` | The service worker that caches the app shell for a fast, offline-tolerant load. |
+| `icons/` | The app icon: one SVG source, plus 192px/512px PNGs rendered from it for installers that want a raster. |
 | `firebase-config.js` | Your Firebase project's config (you fill this in). |
 | `firestore.rules` | The database rules to paste into the Firebase console. |
 | `package.json` | Pins the Node version, and Playwright for the test suite — nothing the app itself loads. |

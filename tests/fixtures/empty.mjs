@@ -13,6 +13,11 @@ const docSnapFor = (path, id) => {
   const row = rows(path).find((r) => r.id === id);
   return { exists: () => !!row, id, data: () => (row ? { ...row } : null) };
 };
+const groupSnapFor = (name) => {
+  const matchingPaths = Object.keys(store).filter((p) => Array.isArray(store[p]) && p.split("/").pop() === name);
+  const docs = matchingPaths.flatMap((p) => rows(p).map((r) => ({ id: r.id, data: () => ({ ...r }), ref: { path: p, id: r.id } })));
+  return { empty: !docs.length, docs, forEach: (fn) => docs.forEach(fn) };
+};
 const notify = () => listeners.forEach((l) => (l.type === "doc" ? l.cb(docSnapFor(l.path, l.id)) : l.cb(snapFor(l.path))));
 
 // See standard.mjs -- some actions in the app navigate with a real page
@@ -38,8 +43,9 @@ export const initializeFirestore = () => ({});
 export const persistentLocalCache = (opts) => opts;
 export const persistentMultipleTabManager = () => ({});
 export const collection = (_db, ...s) => ({ kind: "collection", path: s.join("/") });
+export const collectionGroup = (_db, name) => ({ kind: "collectionGroup", name });
 export const doc = (_db, ...s) => ({ kind: "doc", path: s.slice(0, -1).join("/"), id: s[s.length - 1] });
-export const getDocs = async (ref) => snapFor(ref.path);
+export const getDocs = async (ref) => (ref.kind === "collectionGroup" ? groupSnapFor(ref.name) : snapFor(ref.path));
 export const getDoc = async (ref) => docSnapFor(ref.path, ref.id);
 export const onSnapshot = (ref, onNext) => {
   if (ref.kind === "doc") {

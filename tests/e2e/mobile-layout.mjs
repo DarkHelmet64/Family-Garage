@@ -10,7 +10,7 @@ import { check, report } from "../helpers/serve.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 const FIXTURE = path.resolve(ROOT, "tests", "fixtures", "standard.mjs");
-const TYPES = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css" };
+const TYPES = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".svg": "image/svg+xml", ".png": "image/png" };
 
 const server = http.createServer((req, res) => {
   const reqPath = req.url.split("?")[0];
