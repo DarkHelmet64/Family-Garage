@@ -35,6 +35,17 @@ service cloud.firestore {
       allow delete: if true;
     }
 
+    // A dated log of what's been bought for the shelf. Each entry names the
+    // part it restocked, so deleting one can put its quantity back.
+    match /purchases/{purchaseId} {
+      allow read: if true;
+      allow create, update: if request.resource.data.keys().hasAll(['partId', 'partName', 'quantity'])
+                             && request.resource.data.partId is string
+                             && request.resource.data.partName is string
+                             && request.resource.data.quantity is number;
+      allow delete: if true;
+    }
+
     match /vehicles/{vehicleId} {
       allow read: if true;
       allow create, update: if request.resource.data.keys().hasAll(['name'])

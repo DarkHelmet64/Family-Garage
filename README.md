@@ -569,6 +569,23 @@ what you save is always a new, separate item on the shelf, never a change to
 the one you copied. Leave it on **— start blank —**, the default, and the
 sheet behaves exactly as it always has.
 
+### Purchases
+
+The 🧾 button on any shelf row is **Log a purchase** — how many, what it cost
+in total, who it was bought from, and the date, defaulting to today. Saving
+adds that quantity onto the shelf, the same as typing it into **On the
+shelf** would, and keeps a dated entry of the purchase itself: what the part
+was called and counted in at the time, so a later rename or removal doesn't
+change what the log says was bought. **+ Add a part** does the same
+automatically for a brand-new item's starting count, so the first batch
+shows up in the log without a second step.
+
+**🧾 Purchases**, next to **+ Add a part**, lists every logged purchase,
+newest first, with a running total of what's been spent. Tap one to delete
+it — the quantity comes back off the shelf, same as it went on. The **+**/**−**
+buttons and editing a part's own **On the shelf** figure are still there for a
+quick recount and don't touch the log; only **Log a purchase** does.
+
 ### Which vehicles a part fits
 
 **Fits** is a row of chips, one per vehicle. Pick none — the default — and the

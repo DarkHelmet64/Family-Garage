@@ -95,6 +95,8 @@ h1 {
 
 .page-head h1 { margin: 0; }
 
+.page-head-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+
 h1 .emoji { margin-right: 6px; }
 
 .loading, .empty {

@@ -70,6 +70,7 @@ const vehicleId = params.get("vehicle");
 const isNewVehiclePage = params.has("new");
 const isSchedulePage = params.has("schedule");
 const isPartsPage = params.has("parts");
+const isPurchasesPage = params.has("purchases");
 const isNamesPage = params.has("names");
 
 // Common services, offered as a datalist so the same wording gets reused across
@@ -102,6 +103,8 @@ function route() {
     renderNewVehicleView();
   } else if (isPartsPage) {
     renderPartsView();
+  } else if (isPurchasesPage) {
+    renderPurchasesView();
   } else if (isNamesPage) {
     renderServiceNamesView();
   } else if (vehicleId && isSchedulePage) {
@@ -1060,7 +1063,10 @@ function renderPartsView() {
     <a class="back-link" href="./">&larr; Garage</a>
     <div class="page-head">
       <h1><span class="emoji">🔩</span>Parts &amp; supplies</h1>
-      <button class="secondary small" data-act="add-part">+ Add a part</button>
+      <div class="page-head-actions">
+        <button class="secondary small" data-act="view-purchases">🧾 Purchases</button>
+        <button class="secondary small" data-act="add-part">+ Add a part</button>
+      </div>
     </div>
     <p class="hint" id="parts-intro"></p>
     <div id="parts-list"><p class="loading">Loading…</p></div>
@@ -1194,6 +1200,7 @@ function partRowHtml(part, vehicles = []) {
         <span class="part-qty ${negative ? "negative" : low ? "low" : ""}">${escapeHtml(formatQuantity(part))}</span>
         ${negative ? `<span class="row-meta">more booked out than the shelf held — worth a recount</span>` : ""}
         <div class="row-actions">
+          <button class="ghost" data-act="log-purchase" data-id="${part.id}" title="Log a purchase">🧾</button>
           <button class="ghost" data-act="part-minus" data-id="${part.id}" title="Take one off the shelf">−</button>
           <button class="ghost" data-act="part-plus" data-id="${part.id}" title="Put one back">+</button>
         </div>
@@ -1212,6 +1219,13 @@ function handlePartsAction(action, id, state) {
       return adjustPartQuantity(id, 1);
     case "part-minus":
       return adjustPartQuantity(id, -1);
+    case "log-purchase": {
+      const part = state.parts.find((candidate) => candidate.id === id);
+      return part ? openPurchaseForm(part, state) : null;
+    }
+    case "view-purchases":
+      location.search = "?purchases";
+      return null;
     default:
       return null;
   }
@@ -1221,6 +1235,95 @@ function handlePartsAction(action, id, state) {
 // every change rather than the last read winning.
 function adjustPartQuantity(partId, delta) {
   return updateDoc(doc(db, "parts", partId), { quantity: increment(delta), updatedAt: serverTimestamp() });
+}
+
+// ---------------------------------------------------------------------------
+// Purchases
+//
+// A dated log of what's actually been bought, separate from the shelf's own
+// quantity/cost -- which only ever say what's true right now. What the name,
+// unit and vendor were at the time are copied onto the entry rather than
+// looked up from the part each time it's read, the same reasoning as a
+// service record's own parts list: renaming or removing the part later
+// shouldn't change what the log says was bought.
+// ---------------------------------------------------------------------------
+
+async function recordPurchase(part, payload) {
+  await addDoc(collection(db, "purchases"), {
+    partId: part.id,
+    partName: part.name,
+    quantity: payload.quantity,
+    unit: part.unit || "each",
+    totalCents: payload.totalCents,
+    unitCostCents: payload.totalCents && payload.quantity ? Math.round(payload.totalCents / payload.quantity) : null,
+    vendor: payload.vendor || null,
+    purchasedOn: payload.purchasedOn,
+    notes: payload.notes || null,
+    createdAt: serverTimestamp(),
+  });
+}
+
+// The shelf moves first and the log second -- if the log write then fails,
+// the shelf is still correctly stocked, just missing its record, rather than
+// a logged purchase that never actually landed on the shelf.
+async function logPartPurchase(part, payload) {
+  await updateDoc(doc(db, "parts", part.id), { quantity: increment(payload.quantity), updatedAt: serverTimestamp() });
+  await recordPurchase(part, payload);
+}
+
+async function openPurchaseForm(part, state) {
+  const values = await openFormModal({
+    title: `Log a purchase`,
+    hint: `Adds to ${part.name}'s shelf count and keeps a dated record of what it cost.`,
+    fields: [
+      { name: "purchasedOn", label: "Date", type: "date", half: true, value: todayISO() },
+      {
+        name: "quantity",
+        label: `Quantity (${part.unit || "each"})`,
+        type: "number",
+        step: "0.01",
+        min: 0,
+        inputmode: "decimal",
+        half: true,
+        placeholder: "4",
+      },
+      {
+        name: "totalCost",
+        label: "Total cost (optional)",
+        type: "number",
+        step: "0.01",
+        min: 0,
+        inputmode: "decimal",
+        half: true,
+        placeholder: "45.99",
+      },
+      {
+        name: "vendor",
+        label: "Bought from (optional)",
+        type: "text",
+        half: true,
+        value: part.vendor || "",
+        suggestions: usedValues(state.parts, "vendor"),
+      },
+      { name: "notes", label: "Notes (optional)", type: "text", placeholder: "On sale" },
+    ],
+    submitLabel: "Log it",
+    validate: (v) => {
+      if (!(Number(v.quantity) > 0)) return "How many did you buy?";
+      if (v.totalCost && !Number.isFinite(Number(v.totalCost))) return "That cost doesn't look like a number.";
+      return null;
+    },
+  });
+  if (!values) return;
+
+  await logPartPurchase(part, {
+    quantity: Number(values.quantity),
+    totalCents: values.totalCost ? dollarsToCents(values.totalCost) : null,
+    vendor: values.vendor || null,
+    purchasedOn: values.purchasedOn,
+    notes: values.notes || null,
+  });
+  showToast("Purchase logged");
 }
 
 // What "start from an existing part" loads into the rest of the sheet --
@@ -1451,9 +1554,128 @@ async function openPartForm(existing, state) {
     updatedAt: serverTimestamp(),
   };
 
-  if (existing) await updateDoc(doc(db, "parts", existing.id), payload);
-  else await addDoc(collection(db, "parts"), { ...payload, createdAt: serverTimestamp() });
+  if (existing) {
+    await updateDoc(doc(db, "parts", existing.id), payload);
+  } else {
+    const ref = await addDoc(collection(db, "parts"), { ...payload, createdAt: serverTimestamp() });
+    // The starting count on a brand-new part is itself a purchase -- log it
+    // the same way restocking one later does, just without a second shelf
+    // adjustment, since addDoc above already set the quantity directly.
+    if (payload.quantity > 0) {
+      await recordPurchase(
+        { id: ref.id, name: payload.name, unit: payload.unit },
+        {
+          quantity: payload.quantity,
+          totalCents: payload.unitCostCents ? payload.unitCostCents * payload.quantity : null,
+          vendor: payload.vendor,
+          purchasedOn: todayISO(),
+          notes: null,
+        }
+      );
+    }
+  }
   showToast(existing ? "Part updated" : "Added to the shelf");
+}
+
+// ---------------------------------------------------------------------------
+// Purchases view: every logged purchase, newest first
+// ---------------------------------------------------------------------------
+
+function renderPurchasesView() {
+  $app.innerHTML = `
+    <a class="back-link" href="?parts">&larr; Parts &amp; supplies</a>
+    <h1><span class="emoji">🧾</span>Purchases</h1>
+    <p class="hint">Every purchase logged from the parts shelf, newest first. Log one from any
+    part there to start keeping a record of what you've bought.</p>
+    <p class="hint" id="purchases-intro"></p>
+    <div id="purchases-list"><p class="loading">Loading…</p></div>
+  `;
+
+  const state = { purchases: [] };
+  $app.addEventListener("click", (event) => {
+    const target = event.target.closest("[data-act]");
+    if (!target) return;
+    Promise.resolve(handlePurchasesAction(target.dataset.act, target.dataset.id, state)).catch(reportActionFailure);
+  });
+
+  const listEl = document.getElementById("purchases-list");
+  onSnapshot(
+    collection(db, "purchases"),
+    (snap) => {
+      state.purchases = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      state.purchases.sort((a, b) => String(b.purchasedOn || "").localeCompare(String(a.purchasedOn || "")));
+      drawPurchases(listEl, state);
+    },
+    (err) => {
+      listEl.innerHTML = `<p class="empty">Couldn't load the purchase log.<br /><span class="hint">${escapeHtml(err.message)}</span></p>`;
+    }
+  );
+}
+
+function drawPurchases(listEl, state) {
+  const introEl = document.getElementById("purchases-intro");
+  if (!state.purchases.length) {
+    introEl.textContent = "";
+    listEl.innerHTML = `<p class="empty small">Nothing logged yet.</p>`;
+    return;
+  }
+  const totalCents = state.purchases.reduce((sum, purchase) => sum + (purchase.totalCents || 0), 0);
+  introEl.textContent = `${state.purchases.length} purchase${state.purchases.length === 1 ? "" : "s"}${
+    totalCents ? ` · ${formatUSD(totalCents)} total` : ""
+  }`;
+  listEl.innerHTML = `<div class="list">${state.purchases.map(purchaseRowHtml).join("")}</div>`;
+}
+
+function purchaseRowHtml(purchase) {
+  const meta = [purchase.vendor ? `from ${purchase.vendor}` : null, purchase.unitCostCents ? `${formatUSD(purchase.unitCostCents)} each` : null]
+    .filter(Boolean)
+    .join(" · ");
+  return `
+    <div class="row purchase-row tappable" data-act="delete-purchase" data-id="${purchase.id}">
+      <div class="row-main">
+        <span class="row-title-text">${escapeHtml(purchase.partName || "Part")}</span>
+        <span class="row-meta">${escapeHtml(formatISO(purchase.purchasedOn))}${meta ? ` · ${escapeHtml(meta)}` : ""}</span>
+        ${purchase.notes ? `<span class="row-note">${escapeHtml(purchase.notes)}</span>` : ""}
+      </div>
+      <div class="row-side">
+        <span class="part-qty">${escapeHtml(String(purchase.quantity))} ${escapeHtml(purchase.unit || "each")}</span>
+        ${purchase.totalCents ? `<span class="row-meta">${escapeHtml(formatUSD(purchase.totalCents))}</span>` : ""}
+      </div>
+    </div>
+  `;
+}
+
+function handlePurchasesAction(action, id, state) {
+  switch (action) {
+    case "delete-purchase":
+      return confirmDeletePurchase(state.purchases.find((purchase) => purchase.id === id));
+    default:
+      return null;
+  }
+}
+
+async function confirmDeletePurchase(purchase) {
+  if (!purchase) return;
+  const confirmed = await openConfirmModal({
+    title: "Delete this purchase?",
+    message: `${purchase.quantity} ${purchase.unit || "each"} of ${purchase.partName} comes back off the shelf, and this log entry is gone for good.`,
+    confirmLabel: "Delete",
+    danger: true,
+  });
+  if (!confirmed) return;
+  await deletePurchase(purchase);
+  showToast("Purchase deleted");
+}
+
+async function deletePurchase(purchase) {
+  try {
+    await updateDoc(doc(db, "parts", purchase.partId), { quantity: increment(-purchase.quantity), updatedAt: serverTimestamp() });
+  } catch (err) {
+    // The part itself may have been removed from the shelf since -- the log
+    // entry still goes, there's just no shelf left to put it back onto.
+    console.warn("Couldn't reverse the shelf for a deleted purchase", err);
+  }
+  await deleteDoc(doc(db, "purchases", purchase.id));
 }
 
 // ---------------------------------------------------------------------------
