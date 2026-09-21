@@ -2283,14 +2283,45 @@ function serviceRowHtml(service, ctx) {
   `;
 }
 
+// The vehicle's own schedule, for pages that don't otherwise load it (the
+// vehicle's own body -- where "+ Add service" actually lives -- keeps its
+// own state lean and has never needed this collection before). The Schedule
+// page's own state already carries it live in `state.schedule`, so that's
+// used as-is and nothing is fetched twice; a page without it gets one
+// one-off read, cached on state so retyping a few keystrokes doesn't repeat
+// it, and re-checked on every call so it hands over the live copy the
+// moment one shows up instead.
+async function vehicleSchedule(state) {
+  if (state.schedule) return state.schedule;
+  if (!state.id) return [];
+  if (!state._scheduleFetch) {
+    state._scheduleFetch = getDocs(collection(db, "vehicles", state.id, "schedule"))
+      .then((snap) => snap.docs.map((d) => ({ id: d.id, ...d.data() })))
+      .catch(() => []);
+  }
+  return state._scheduleFetch;
+}
+
 // Hands back an onChange for a form's title field that loads a matching
-// service name's usual parts into `partsFieldName`'s own field, the moment
-// the title matches one with a kit saved. fillIfEmpty (bindPartsField, ui.js)
-// is what actually guards against overwriting parts someone's already
-// picked -- this only has to find the kit and hand it over.
+// job's usual parts into `partsFieldName`'s own field, the moment the title
+// matches one with parts saved. fillIfEmpty (bindPartsField, ui.js) is what
+// actually guards against overwriting parts someone's already picked --
+// this only has to find the right kit and hand it over.
+//
+// Two places a kit can live, checked most-specific first: this vehicle's
+// own schedule entry for the job (see the service schedule's own "Parts
+// needed" -- a real filter, not a placeholder, for a job that takes a
+// different one on every vehicle), then the service name's shared kit,
+// which is the only one there is for a job with no per-vehicle schedule
+// entry of its own. Same precedence bookScheduleEntry already gives the
+// entry's own list over anything else once a job's actually booked --
+// this just applies it earlier, while someone's still typing.
 function kitAutofill(state, partsFieldName) {
-  return (title, _overlay, controllers) => {
-    const kit = defaultPartsFor(state.serviceNames || [], title, state.id || null);
+  return async (title, _overlay, controllers) => {
+    const wanted = normalizeJob(title);
+    const schedule = await vehicleSchedule(state);
+    const ownEntry = (schedule || []).find((entry) => normalizeJob(entry.title) === wanted && entry.partsNeeded?.length);
+    const kit = ownEntry ? ownEntry.partsNeeded : defaultPartsFor(state.serviceNames || [], title, state.id || null);
     if (kit) controllers.get(partsFieldName)?.fillIfEmpty(kit);
   };
 }
