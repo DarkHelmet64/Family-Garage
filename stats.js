@@ -386,6 +386,39 @@ export function shortageVendors(shortages) {
   return vendors;
 }
 
+// What's actually been taken off the shelf for a record already, as opposed
+// to what it simply lists. A done record's real usage is always in `parts`.
+// An open one's is in `partsNeeded`, but only once `reserved` says that list
+// has actually been charged to the shelf -- a record from before parts
+// started reserving at assignment time carries a partsNeeded list that was
+// never deducted, so treating it as already-reserved would silently skip
+// charging the shelf the first time that record is touched. See
+// migratePartsReservations (app.js) for the one-time sweep that catches the rest.
+export function currentlyReserved(record) {
+  if (!record) return [];
+  if (record.status === "done") return record.parts || [];
+  return record.reserved ? record.partsNeeded || [] : [];
+}
+
+// How much of each part is currently spoken for by a scheduled-but-not-done
+// job, across the whole garage -- summed live from the services themselves
+// rather than kept as its own stored counter. A part's own `quantity` on the
+// shelf is already net of this (reserving something takes it off the shelf
+// the moment it's assigned), so this exists purely to show *how much* of
+// that's tied up right now, e.g. "8 qt on the shelf, 3 reserved, 5 free" --
+// not to change what quantity itself means or how it's written.
+export function reservedByPart(services) {
+  const totals = new Map();
+  for (const record of services || []) {
+    if (record.status === "done") continue;
+    for (const used of currentlyReserved(record)) {
+      if (!used.partId) continue;
+      totals.set(used.partId, (totals.get(used.partId) || 0) + (Number(used.quantity) || 0));
+    }
+  }
+  return totals;
+}
+
 // ---------------------------------------------------------------------------
 // The service schedule
 //
@@ -559,6 +592,7 @@ export function serviceNameReport(vehicles, serviceNames = []) {
         records: entry.records,
         favorite: !!saved?.favorite,
         fitsVehicleIds: saved?.fitsVehicleIds?.length ? saved.fitsVehicleIds : null,
+        defaultParts: saved?.defaultParts?.length ? saved.defaultParts : null,
       };
     })
     .sort((a, b) => a.name.localeCompare(b.name));
@@ -578,6 +612,21 @@ export function serviceNameSuggestions(serviceNames, vehicleId, { favoritesOnly 
     .sort((a, b) => (b.favorite ? 1 : 0) - (a.favorite ? 1 : 0) || String(a.name).localeCompare(String(b.name)))
     .map((entry) => String(entry.name || "").trim())
     .filter(Boolean);
+}
+
+// The usual parts for a job, by name -- what a service-names entry's own
+// `defaultParts` kit carries, so a title matching one can be pre-filled
+// instead of picked from scratch every time. Scoped the same way a
+// suggestion is: a kit on a name reserved for other vehicles doesn't apply
+// here. Nothing saved yet, or no match at all, both read the same -- null.
+export function defaultPartsFor(serviceNames, title, vehicleId = null) {
+  const wanted = normalizeJob(title);
+  const entry = (serviceNames || []).find(
+    (candidate) =>
+      normalizeJob(candidate.name) === wanted &&
+      (!candidate.fitsVehicleIds?.length || !vehicleId || candidate.fitsVehicleIds.includes(vehicleId))
+  );
+  return entry?.defaultParts?.length ? entry.defaultParts : null;
 }
 
 // ---------------------------------------------------------------------------

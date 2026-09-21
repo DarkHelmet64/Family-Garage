@@ -34,6 +34,7 @@ import {
 } from "./format.js";
 import {
   escapeHtml,
+  buildModal,
   showToast,
   openAlertModal,
   openConfirmModal,
@@ -59,8 +60,11 @@ import {
   upcomingWork,
   shelfShortages,
   shortageVendors,
+  currentlyReserved,
+  reservedByPart,
   serviceNameReport,
   serviceNameSuggestions,
+  defaultPartsFor,
   STATS_VERSION,
 } from "./stats.js";
 
@@ -433,6 +437,7 @@ function renderServiceNamesView() {
   const state = {
     vehicles: [],
     serviceNames: [],
+    parts: [],
     report: [],
     expandedNames: new Set(),
     mergeMode: false,
@@ -450,6 +455,7 @@ function renderServiceNamesView() {
       .then((loaded) => {
         state.vehicles = loaded.vehicles;
         state.serviceNames = loaded.serviceNames;
+        state.parts = loaded.parts;
         renderNamesList(state);
       })
       .catch((err) => {
@@ -703,6 +709,14 @@ async function openServiceNameForm(entry, state) {
         options: [...state.vehicles].sort(byVehicleName).map((vehicle) => ({ value: vehicle.id, label: vehicle.name })),
         hint: "Pick none and it's offered for every vehicle.",
       },
+      {
+        name: "defaultParts",
+        label: "Usual parts (optional)",
+        type: "parts",
+        value: entry?.defaultParts || [],
+        catalogue: state.parts || [],
+        hint: "Loaded in automatically wherever this name is picked or typed for a service -- as long as no parts have been added there yet.",
+      },
     ],
     submitLabel: entry ? "Save changes" : "Add it",
     validate: (v) => (v.name ? null : "What should it be called?"),
@@ -716,6 +730,7 @@ async function openServiceNameForm(entry, state) {
   await saveServiceName(entry, {
     name: values.name,
     favorite: !!values.favorite,
+    defaultParts: (values.defaultParts || []).map(({ partId, quantity }) => ({ partId, quantity })),
     fitsVehicleIds: values.fitsVehicleIds || [],
   });
 
@@ -1208,7 +1223,7 @@ function renderPartsView() {
     <div id="parts-list"><p class="loading">Loading…</p></div>
   `;
 
-  const state = { parts: [], vehicles: [] };
+  const state = { parts: [], vehicles: [], reserved: new Map() };
   $app.addEventListener("click", (event) => {
     const target = event.target.closest("[data-act]");
     if (!target) return;
@@ -1227,6 +1242,19 @@ function renderPartsView() {
       if (state.parts.length) drawParts(listEl, state);
     },
     (err) => console.warn("Couldn't read the vehicle list", err)
+  );
+  // Same reasoning as everywhere else this session's read-cost work touched:
+  // one collection-group query covers every vehicle's scheduled jobs, so
+  // showing how much of each part they've spoken for doesn't cost a read per
+  // vehicle. Only needed for that breakdown -- the shelf itself, same as the
+  // vehicle list above, renders fine without waiting on it.
+  onSnapshot(
+    collectionGroup(db, "services"),
+    (snap) => {
+      state.reserved = reservedByPart(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+      if (state.parts.length) drawParts(listEl, state);
+    },
+    (err) => console.warn("Couldn't read what's reserved across the garage", err)
   );
   onSnapshot(
     collection(db, "parts"),
@@ -1278,7 +1306,7 @@ function drawParts(listEl, state) {
     groups.get(key).push(part);
   }
 
-  const list = (parts) => `<div class="list">${parts.map((part) => partRowHtml(part, state.vehicles)).join("")}</div>`;
+  const list = (parts) => `<div class="list">${parts.map((part) => partRowHtml(part, state.vehicles, state.reserved)).join("")}</div>`;
   if (groups.size === 1 && groups.has("")) {
     listEl.innerHTML = list(state.parts);
     return;
@@ -1298,8 +1326,23 @@ function formatQuantity(part) {
   return `${rounded} ${part.unit || "each"}`;
 }
 
-function partRowHtml(part, vehicles = []) {
+// `quantity` -- what formatQuantity shows -- is already net of anything
+// reserved: a job's parts come off the shelf the moment it's scheduled, not
+// when it's actually done. Nothing about that changes here; this is purely
+// the "why is it lower than I expected" context, on its own line rather than
+// packed into the bold figure itself, which needs to stay short enough not
+// to wrap oddly on a narrow phone.
+function reservedLineHtml(part, reserved) {
+  if (!reserved) return "";
+  const unit = part.unit || "each";
+  const roundedReserved = Math.round(reserved * 100) / 100;
+  const total = Math.round(((Number(part.quantity) || 0) + reserved) * 100) / 100;
+  return `<span class="row-meta">${escapeHtml(`${roundedReserved} ${unit} reserved for scheduled jobs · ${total} ${unit} total`)}</span>`;
+}
+
+function partRowHtml(part, vehicles = [], reservedByPartId = new Map()) {
   const low = isLowStock(part);
+  const reserved = reservedByPartId.get(part.id) || 0;
   // Booking out more than the shelf held leaves a negative count. That's kept
   // rather than clamped -- it means the count was wrong, and hiding it would
   // lose the only evidence of that -- but it's shown as a discrepancy, not as
@@ -1334,6 +1377,7 @@ function partRowHtml(part, vehicles = []) {
       </div>
       <div class="row-side">
         <span class="part-qty ${negative ? "negative" : low ? "low" : ""}">${escapeHtml(formatQuantity(part))}</span>
+        ${reservedLineHtml(part, reserved)}
         ${negative ? `<span class="row-meta">more booked out than the shelf held — worth a recount</span>` : ""}
         <div class="row-actions">
           <button class="ghost" data-act="log-purchase" data-id="${part.id}" title="Log a purchase">🧾</button>
@@ -1492,6 +1536,79 @@ function fillPartTemplate(overlay, part) {
   });
 }
 
+// A part's own history: what's been bought (the purchase log) and where
+// it's gone (every service across the garage that's used or reserved it).
+// Read fresh each time this opens rather than kept live on the page's own
+// state -- it's a look-back, not something that needs to update while
+// someone's standing here reading it, so there's no reason to hold either
+// list in memory before it's actually asked for.
+async function openPartHistory(part, state) {
+  const [purchasesSnap, servicesSnap] = await Promise.all([
+    getDocs(collection(db, "purchases")),
+    getDocs(collectionGroup(db, "services")),
+  ]);
+
+  const bought = purchasesSnap.docs
+    .map((d) => ({ id: d.id, ...d.data() }))
+    .filter((purchase) => purchase.partId === part.id)
+    .sort((a, b) => String(b.purchasedOn || "").localeCompare(String(a.purchasedOn || "")));
+
+  // The same question currentlyReserved always answers: what's actually been
+  // taken off the shelf for this record, not just what it lists -- a
+  // scheduled job that's never actually been swept for reservation (see
+  // currentlyReserved's own note) hasn't really claimed anything yet, so it
+  // doesn't belong here either.
+  const vehicleName = (id) => state.vehicles.find((vehicle) => vehicle.id === id)?.name || "a vehicle since removed";
+  const usedOn = servicesSnap.docs
+    .map((d) => ({ vehicleId: d.ref.path.split("/")[1], ...d.data() }))
+    .flatMap((service) => currentlyReserved(service).filter((used) => used.partId === part.id).map((used) => ({ service, used })))
+    .sort((a, b) =>
+      String(b.service.servicedOn || b.service.dueOn || "").localeCompare(String(a.service.servicedOn || a.service.dueOn || ""))
+    );
+
+  const boughtRowHtml = (purchase) => {
+    const meta = [purchase.vendor ? `from ${purchase.vendor}` : null, purchase.totalCents ? formatUSD(purchase.totalCents) : null]
+      .filter(Boolean)
+      .join(" · ");
+    return `
+      <div class="row">
+        <div class="row-main">
+          <span class="row-title-text">${escapeHtml(formatISO(purchase.purchasedOn))}</span>
+          ${meta ? `<span class="row-meta">${escapeHtml(meta)}</span>` : ""}
+        </div>
+        <div class="row-side"><span class="part-qty">${escapeHtml(String(purchase.quantity))} ${escapeHtml(purchase.unit || "each")}</span></div>
+      </div>`;
+  };
+
+  const usedRowHtml = ({ service, used }) => {
+    const done = service.status === "done";
+    const when = done ? service.servicedOn : service.dueOn;
+    return `
+      <div class="row">
+        <div class="row-main">
+          <span class="row-title-text">${escapeHtml(service.title || "Service")}</span>
+          <span class="row-meta">${escapeHtml(vehicleName(service.vehicleId))}${when ? ` · ${escapeHtml(formatISO(when))}` : ""} · ${
+            done ? "used" : "reserved"
+          }</span>
+        </div>
+        <div class="row-side"><span class="part-qty">${escapeHtml(String(used.quantity))} ${escapeHtml(used.unit || part.unit || "each")}</span></div>
+      </div>`;
+  };
+
+  const overlay = buildModal(`
+    <h2>${escapeHtml(part.name)}</h2>
+    <p class="hint">${escapeHtml(formatQuantity(part))} on the shelf${part.vendor ? ` · from ${part.vendor}` : ""}${part.unitCostCents ? ` · ${escapeHtml(formatUSD(part.unitCostCents))} each` : ""}</p>
+    <div class="section-title">Bought${bought.length ? ` (${bought.length})` : ""}</div>
+    ${bought.length ? `<div class="list">${bought.map(boughtRowHtml).join("")}</div>` : `<p class="empty small">Nothing logged yet.</p>`}
+    <div class="section-title">Used on${usedOn.length ? ` (${usedOn.length})` : ""}</div>
+    ${usedOn.length ? `<div class="list">${usedOn.map(usedRowHtml).join("")}</div>` : `<p class="empty small">Not used on anything yet.</p>`}
+    <div class="modal-actions">
+      <button id="history-close">Close</button>
+    </div>
+  `);
+  overlay.querySelector("#history-close").addEventListener("click", () => overlay.remove());
+}
+
 async function openPartForm(existing, state) {
   // Adding something you've had before shouldn't mean retyping its brand,
   // model, unit and cost from scratch -- picking one here loads the rest of
@@ -1647,6 +1764,7 @@ async function openPartForm(existing, state) {
       { name: "notes", label: "Notes (optional)", type: "text", value: existing?.notes || "", placeholder: "Bought two at a time" },
     ].filter(Boolean),
     submitLabel: existing ? "Save changes" : "Add it",
+    secondaryAction: existing ? { label: "View purchase & usage history", onClick: () => openPartHistory(existing, state) } : null,
     destructive: existing ? { label: "Remove from the parts list" } : null,
     validate: (v) => {
       if (!v.name) return "What is it called?";
@@ -2163,6 +2281,18 @@ function serviceRowHtml(service, ctx) {
       </div>
     </div>
   `;
+}
+
+// Hands back an onChange for a form's title field that loads a matching
+// service name's usual parts into `partsFieldName`'s own field, the moment
+// the title matches one with a kit saved. fillIfEmpty (bindPartsField, ui.js)
+// is what actually guards against overwriting parts someone's already
+// picked -- this only has to find the kit and hand it over.
+function kitAutofill(state, partsFieldName) {
+  return (title, _overlay, controllers) => {
+    const kit = defaultPartsFor(state.serviceNames || [], title, state.id || null);
+    if (kit) controllers.get(partsFieldName)?.fillIfEmpty(kit);
+  };
 }
 
 // What to offer in the description dropdown: jobs this vehicle has had before,
@@ -2697,6 +2827,7 @@ async function openScheduleServiceForm(state, existing, odometerMiles) {
             value: existing.title || "",
             placeholder: "Oil change",
             suggestions: serviceSuggestions(state),
+            onChange: kitAutofill(state, "partsNeeded"),
           }
         : {
             name: "titles",
@@ -2707,6 +2838,7 @@ async function openScheduleServiceForm(state, existing, odometerMiles) {
             addLabel: "+ Add another job",
             value: [],
             suggestions: serviceSuggestions(state),
+            onChange: kitAutofill(state, "partsNeeded"),
           },
       { name: "dueOn", label: "Due date", type: "date", half: true, value: existing?.dueOn || "" },
       {
@@ -2867,6 +2999,7 @@ async function openCompletedServiceForm(state, existing, odometerMiles, { comple
           : folding
             ? "Everything on the service list, as one trip. Put a cost against each job, and take off any line you didn't have done — those stay on the list."
             : "One trip, several jobs — add a line for each. The total is added up for you.",
+        onChange: kitAutofill(state, "partsUsed"),
       },
       {
         name: "servicedOn",
@@ -3435,6 +3568,7 @@ async function openPlanForm(state, existing) {
         hint: suggestions.length
           ? undefined
           : "Nothing's favorited yet — star a name on the Service names page to offer it here.",
+        onChange: kitAutofill(state, "partsNeeded"),
       },
       {
         name: "everyMiles",
@@ -3552,20 +3686,6 @@ async function bookPlanEntry(state, id) {
   }).find((entry) => entry.id === id);
   if (!row) return;
   await bookScheduleEntry(state.id, row, state.services, { partsNeeded: row.partsNeeded || [] });
-}
-
-// What's actually been taken off the shelf for a record already, as opposed
-// to what it simply lists. A done record's real usage is always in `parts`.
-// An open one's is in `partsNeeded`, but only once `reserved` says that list
-// has actually been charged to the shelf -- a record from before parts
-// started reserving at assignment time carries a partsNeeded list that was
-// never deducted, so treating it as already-reserved would silently skip
-// charging the shelf the first time that record is touched. See
-// migratePartsReservations for the one-time sweep that catches the rest.
-function currentlyReserved(record) {
-  if (!record) return [];
-  if (record.status === "done") return record.parts || [];
-  return record.reserved ? record.partsNeeded || [] : [];
 }
 
 // Moves the shelf by the difference between what a record used to book and what

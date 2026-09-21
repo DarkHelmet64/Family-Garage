@@ -133,7 +133,7 @@ export function openPickerModal({ title, options, cancelLabel = "Cancel" }) {
 // Resolves with a { name: value } object, or null if the sheet was dismissed.
 // ---------------------------------------------------------------------------
 
-export function openFormModal({ title, hint, fields, submitLabel = "Save", validate, destructive }) {
+export function openFormModal({ title, hint, fields, submitLabel = "Save", validate, destructive, secondaryAction }) {
   return new Promise((resolve) => {
     const fieldHtml = fields.map((field) => renderField(field)).join("");
 
@@ -147,6 +147,7 @@ export function openFormModal({ title, hint, fields, submitLabel = "Save", valid
           <button class="secondary" id="form-cancel">Cancel</button>
           <button id="form-submit">${escapeHtml(submitLabel)}</button>
         </div>
+        ${secondaryAction ? `<button type="button" class="link-plain" id="form-secondary">${escapeHtml(secondaryAction.label)}</button>` : ""}
         ${destructive ? `<button class="link-danger" id="form-destructive">${escapeHtml(destructive.label)}</button>` : ""}
       `,
       { onDismiss: () => resolve(null) }
@@ -190,11 +191,32 @@ export function openFormModal({ title, hint, fields, submitLabel = "Save", valid
 
     // A field naming its own onChange gets to react live as it changes -- used
     // to load another field's picked value into the rest of the sheet, without
-    // the form framework itself knowing why.
+    // the form framework itself knowing why. `listState` is handed along as a
+    // third argument so a callback can reach a sibling list/parts field's own
+    // controller (fillIfEmpty, setCost, ...) -- the same map already used to
+    // wire the parts field up to a list field's lines.
+    //
+    // A list field has no single input to listen to, so this watches its
+    // FIRST line's title instead -- the same "the first job listed" scope
+    // the parts field's own "which job" dropdown already lives by.
     for (const field of fields) {
       if (!field.onChange) continue;
+      if (field.type === "list") {
+        const controller = listState.get(field.name);
+        let lastTitle = null;
+        controller.onChange(() => {
+          const title = controller.lines()[0]?.title || "";
+          if (title === lastTitle) return;
+          lastTitle = title;
+          field.onChange(title, overlay, listState);
+        });
+        continue;
+      }
       const input = overlay.querySelector(`[data-field="${field.name}"]`);
-      if (input) input.addEventListener("change", () => field.onChange(input.value, overlay));
+      if (!input) continue;
+      const fire = () => field.onChange(input.value, overlay, listState);
+      input.addEventListener("change", fire);
+      input.addEventListener("input", fire);
     }
 
     const readValues = () => {
@@ -245,6 +267,12 @@ export function openFormModal({ title, hint, fields, submitLabel = "Save", valid
         overlay.remove();
         resolve({ __destructive: true });
       });
+    }
+    // Unlike destructive, this doesn't close or resolve the sheet -- it's for
+    // a read-only side trip (viewing history, say) that comes back to the
+    // same in-progress edit rather than losing it.
+    if (secondaryAction) {
+      overlay.querySelector("#form-secondary").addEventListener("click", () => secondaryAction.onClick());
     }
     overlay.querySelectorAll("input").forEach((input) => {
       input.addEventListener("keydown", (e) => {
@@ -661,6 +689,20 @@ function bindPartsField(overlay, field) {
             quantity: round2(toBuyUnits(part, row.quantity)),
           };
         });
+    },
+    // Loads a job's usual parts in, but only while nothing's been picked
+    // yet -- called when a title matching a saved kit is typed or chosen,
+    // never overwriting a row someone's already started on.
+    fillIfEmpty: (entries) => {
+      if (rows.some((row) => row.partId)) return;
+      rows = (entries || []).map((entry) => ({
+        partId: entry.partId,
+        quantity: entry.quantity != null ? String(entry.quantity) : "1",
+        forJob: "",
+        lineId: null,
+      }));
+      if (!rows.length) rows = [{ partId: "", quantity: "1", forJob: "", lineId: null }];
+      render();
     },
   };
 }

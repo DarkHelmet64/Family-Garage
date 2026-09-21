@@ -138,7 +138,12 @@ const groupSnapFor = (name) => {
   const docs = matchingPaths.flatMap((p) => rows(p).map((r) => ({ id: r.id, data: () => ({ ...r }), ref: { path: p, id: r.id } })));
   return { empty: !docs.length, docs, forEach: (fn) => docs.forEach(fn) };
 };
-const notify = () => listeners.forEach((l) => (l.type === "doc" ? l.cb(docSnapFor(l.path, l.id)) : l.cb(snapFor(l.path))));
+const notify = () =>
+  listeners.forEach((l) => {
+    if (l.type === "doc") l.cb(docSnapFor(l.path, l.id));
+    else if (l.type === "collectionGroup") l.cb(groupSnapFor(l.name));
+    else l.cb(snapFor(l.path));
+  });
 
 // A handful of actions in the app navigate by setting location.search, which
 // is a real page reload -- and would otherwise reset this store to its
@@ -195,6 +200,12 @@ export const getDoc = async (ref) => {
   return docSnapFor(ref.path, ref.id);
 };
 export const onSnapshot = (ref, onNext) => {
+  if (ref.kind === "collectionGroup") {
+    count("onSnapshot", `collectionGroup:${ref.name}`);
+    listeners.push({ type: "collectionGroup", name: ref.name, cb: onNext });
+    setTimeout(() => onNext(groupSnapFor(ref.name)), 0);
+    return () => {};
+  }
   count("onSnapshot", ref.path);
   if (ref.kind === "doc") {
     listeners.push({ type: "doc", path: ref.path, id: ref.id, cb: onNext });
