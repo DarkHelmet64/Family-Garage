@@ -555,6 +555,13 @@ always what's actually still there, spoken for or not, and [the buy
 list](#whats-coming-up) is read straight off that number rather than worked
 out from what any job says it'll need someday.
 
+A row with something reserved says so right there: the bold figure is still
+what's free to use, same as it's always been, with a second line underneath
+it — **5 qt reserved for scheduled jobs · 8 qt total** — so a number that
+looks low has its explanation right on the shelf instead of sending you off
+to dig through scheduled jobs to find it. A part with nothing reserved
+against it shows exactly as it always did, nothing added.
+
 Give things categories and the shelf sorts itself into them, named categories
 first and anything without one at the end. Categorise nothing and it stays the
 one flat list it always was.
@@ -585,6 +592,16 @@ newest first, with a running total of what's been spent. Tap one to delete
 it — the quantity comes back off the shelf, same as it went on. The **+**/**−**
 buttons and editing a part's own **On the shelf** figure are still there for a
 quick recount and don't touch the log; only **Log a purchase** does.
+
+### A part's history
+
+Tapping a part row still opens it for editing, exactly as it always has.
+Inside that sheet, **View purchase & usage history** opens a read-only
+rundown of everywhere it's been: every [logged purchase](#purchases) of it,
+newest first, and every service across the whole garage that's used or
+reserved it — done or still scheduled, each naming its own job and vehicle.
+Nothing in it is editable, and closing it leaves the edit sheet underneath
+exactly as you left it, mid-edit or not.
 
 ### Which vehicles a part fits
 
@@ -782,7 +799,7 @@ and when it was last actually done on each, with an **Open** link straight to
 that vehicle. A vehicle that only has a schedule entry or a booked job for it
 — nothing done yet — shows "not logged yet" instead of a date.
 
-**Edit** covers three things at once, all in the same sheet:
+**Edit** covers four things at once, all in the same sheet:
 
 - **Renaming** changes the name **everywhere**: every schedule entry, every
   booked job, every item on a past visit, and which job a booked part was for
@@ -795,6 +812,14 @@ that vehicle. A vehicle that only has a schedule entry or a booked job for it
   [service schedule's](#the-service-schedule) own dropdown, which offers
   favorites only. Nothing is favorited by default, including the common
   built-in suggestions — star the handful you actually keep on a schedule.
+- **Usual parts (optional)** sets what this job usually takes, with the same
+  parts picker used everywhere else. Pick or type this name anywhere —
+  scheduling a job, logging one already done, or giving it its own [recurring
+  interval](#the-service-schedule) — and if that record's own parts list is
+  still empty, it fills in from here the moment the name matches. Anything
+  already on the list, typed or picked yourself, is left exactly alone, and
+  so is a schedule entry's own **Parts needed** once you've set one there —
+  this is only ever the fallback default underneath that.
 - **Applies to** scopes the name to particular vehicles, the same "pick none
   and it fits anything" idea [a part's fit list](#which-vehicles-a-part-fits)
   uses. A scoped name only offers itself in dropdowns on those vehicles; an
