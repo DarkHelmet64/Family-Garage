@@ -1232,6 +1232,18 @@ function renderPartsView() {
 
   const listEl = document.getElementById("parts-list");
 
+  // Drawing happens inside snapshot callbacks, where a throw is swallowed by
+  // the SDK -- so without this, one malformed record would leave the page on
+  // "Loading…" forever with nothing to say why. Say it in place instead.
+  const draw = () => {
+    try {
+      drawParts(listEl, state);
+    } catch (err) {
+      console.error("Couldn't draw the parts list", err);
+      listEl.innerHTML = `<p class="empty">Couldn't show the parts list.<br /><span class="hint">${escapeHtml(err.message || String(err))}</span></p>`;
+    }
+  };
+
   // Only needed to name the vehicles a part fits -- the shelf itself renders
   // without waiting on them, and one that can't be read just goes unnamed.
   onSnapshot(
@@ -1239,7 +1251,7 @@ function renderPartsView() {
     (snap) => {
       state.vehicles = snap.docs.map((d) => ({ id: d.id, name: d.data().name }));
       state.vehicles.sort(byVehicleName);
-      if (state.parts.length) drawParts(listEl, state);
+      if (state.parts.length) draw();
     },
     (err) => console.warn("Couldn't read the vehicle list", err)
   );
@@ -1251,8 +1263,15 @@ function renderPartsView() {
   onSnapshot(
     collectionGroup(db, "services"),
     (snap) => {
-      state.reserved = reservedByPart(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
-      if (state.parts.length) drawParts(listEl, state);
+      // A bad record here only costs the "reserved" breakdown, never the
+      // shelf itself.
+      try {
+        state.reserved = reservedByPart(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+      } catch (err) {
+        console.warn("Couldn't work out what's reserved across the garage", err);
+        state.reserved = new Map();
+      }
+      if (state.parts.length) draw();
     },
     (err) => console.warn("Couldn't read what's reserved across the garage", err)
   );
@@ -1267,10 +1286,15 @@ function renderPartsView() {
         ? `${state.parts.length} item${state.parts.length === 1 ? "" : "s"} on the shelf${low.length ? ` · ${low.length} running low` : ""}.`
         : "";
 
-      drawParts(listEl, state);
+      draw();
     },
     (err) => {
-      listEl.innerHTML = `<p class="empty">Couldn't load the parts list.<br /><span class="hint">${escapeHtml(err.message)}</span></p>`;
+      console.error("Couldn't load the parts list", err);
+      listEl.innerHTML = `<p class="empty">Couldn't load the parts list.<br /><span class="hint">${escapeHtml(
+        isPermissionDenied(err)
+          ? "The database refused to read it. Publish firestore.rules from this repo in your Firebase console, then reload."
+          : err.message
+      )}</span></p>`;
     }
   );
 }
@@ -1362,7 +1386,7 @@ function partRowHtml(part, vehicles = [], reservedByPartId = new Map()) {
 
   // Naming no vehicle means it fits anything, which needs no saying. A vehicle
   // since deleted is dropped rather than shown as a missing name.
-  const fits = (part.fitsVehicleIds || [])
+  const fits = asList(part.fitsVehicleIds)
     .map((id) => vehicles.find((vehicle) => vehicle.id === id))
     .filter(Boolean)
     .map((vehicle) => vehicle.name);
@@ -1530,7 +1554,7 @@ function fillPartTemplate(overlay, part) {
   set("minQuantity", part?.minQuantity != null ? String(part.minQuantity) : "");
   set("unitCost", part?.unitCostCents ? (part.unitCostCents / 100).toFixed(2) : "");
   set("notes", part?.notes || "");
-  const fits = new Set(part?.fitsVehicleIds || []);
+  const fits = new Set(asList(part?.fitsVehicleIds));
   overlay.querySelectorAll('[data-check="fitsVehicleIds"]').forEach((box) => {
     box.checked = fits.has(box.value);
   });
@@ -1625,8 +1649,8 @@ async function openPartForm(existing, state) {
           options: [
             { value: "", label: "— start blank —" },
             ...[...state.parts]
-              .sort((a, b) => a.name.localeCompare(b.name))
-              .map((part) => ({ value: part.id, label: part.name })),
+              .sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")))
+              .map((part) => ({ value: part.id, label: String(part.name || "(unnamed)") })),
           ],
           onChange: (partId, overlay) => fillPartTemplate(overlay, state.parts.find((part) => part.id === partId)),
         }
@@ -1732,7 +1756,7 @@ async function openPartForm(existing, state) {
       },
       {
         name: "minQuantity",
-        label: "Tell me below",
+        label: "Running low at (optional)",
         type: "number",
         step: "0.01",
         inputmode: "decimal",
@@ -2629,13 +2653,20 @@ async function combineServiceRecords(state, odometerMiles) {
   document.getElementById("vehicle-body").innerHTML = vehicleBodyHtml(state);
 }
 
+function isPermissionDenied(err) {
+  return !!err && (err.code === "permission-denied" || /insufficient permissions/i.test(err.message || ""));
+}
+
+// A field that should hold a list, read defensively: a record edited by hand
+// in the Firebase console can hold a bare string or nothing at all there.
+const asList = (value) => (Array.isArray(value) ? value : []);
+
 // What to say when an action fails. A refusal from the database is worth
 // naming, because it has a specific cause and a specific fix.
 function reportActionFailure(err) {
   console.error(err);
-  const denied = err && (err.code === "permission-denied" || /insufficient permissions/i.test(err.message || ""));
   return openAlertModal(
-    denied
+    isPermissionDenied(err)
       ? "The database refused that. Publish firestore.rules from this repo in your Firebase console, then try again."
       : `Something went wrong: ${err && err.message ? err.message : err}`
   );
@@ -3950,4 +3981,5 @@ async function recomputeSummary(id) {
   });
 }
 
+window.__garageStarted = true;
 route();

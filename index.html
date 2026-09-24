@@ -45,5 +45,19 @@
     })();
   </script>
   <script type="module" src="app.js"></script>
+  <script>
+    // A module that fails to load -- the Firebase SDK unreachable, or a file
+    // the browser cached from an older version -- fails silently, leaving
+    // "Loading…" up forever. app.js sets this flag as soon as it runs, so if
+    // it still isn't set after a generous wait, say so instead.
+    setTimeout(function () {
+      if (window.__garageStarted) return;
+      var app = document.getElementById("app");
+      if (!app || !app.querySelector(".loading")) return;
+      app.innerHTML =
+        '<p class="empty">The app couldn\'t start.<br /><span class="hint">Check your connection and reload. ' +
+        "If it keeps happening, the browser console (Developer tools) will name the file that failed to load.</span></p>";
+    }, 15000);
+  </script>
 </body>
 </html>
