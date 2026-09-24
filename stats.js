@@ -396,8 +396,10 @@ export function shortageVendors(shortages) {
 // migratePartsReservations (app.js) for the one-time sweep that catches the rest.
 export function currentlyReserved(record) {
   if (!record) return [];
-  if (record.status === "done") return record.parts || [];
-  return record.reserved ? record.partsNeeded || [] : [];
+  // Filtered to real entries, so a hand-edited record holding a string, an
+  // object or a null in its parts list can't break every caller.
+  const list = record.status === "done" ? record.parts : record.reserved ? record.partsNeeded : null;
+  return Array.isArray(list) ? list.filter((used) => used && typeof used === "object") : [];
 }
 
 // How much of each part is currently spoken for by a scheduled-but-not-done
