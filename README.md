@@ -862,9 +862,10 @@ and a browser that can't do it (private browsing, a very old one) just falls
 back to needing a connection, the same as before this existed.
 
 A service worker separately caches the app itself — the page, its scripts and
-stylesheet — so it loads instantly on a repeat visit and survives losing
-signal partway through loading, not just after. It updates itself quietly in
-the background; there's nothing to manage.
+stylesheet — so it still opens with no signal at all. While online it always
+asks for the current version first and only falls back to its saved copy when
+the network doesn't answer, so every device runs the same, matching set of
+files; there's nothing to manage.
 
 ## Installing it like an app
 
