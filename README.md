@@ -500,9 +500,9 @@ with receipts shows a 📎 and a count in the service list, and deleting the rec
 takes its photos with it.
 
 **Pinch to zoom in on it, drag to pan around once you have, double-tap to jump
-back out** — the usual gestures, scoped to just the photo itself; the page
-elsewhere keeps the browser's own pinch-zoom turned off so a stray gesture
-doesn't get away from the layout. On a mouse: scroll to zoom, drag to pan,
+back out** — the usual gestures, scoped to just the photo itself, so pinching
+the photo zooms the photo rather than the page; anywhere else, pinch-zoom
+works on the page as normal. On a mouse: scroll to zoom, drag to pan,
 double-click to toggle.
 
 **Where they're stored.** Beside the record in Firestore, not in Cloud Storage.

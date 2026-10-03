@@ -1135,9 +1135,10 @@ export function openPhotoViewer(photo, { onRemove } = {}) {
 }
 
 // Pinch to zoom, drag to pan once zoomed, double-tap (or double-click) to
-// toggle between fit and a closer look -- scoped to just this image, since
-// the page's own viewport blocks pinch-zoom everywhere else to keep the rest
-// of the layout from getting away from someone's thumb. Mouse panning rides
+// toggle between fit and a closer look -- scoped to just this image: a
+// two-finger move on it is taken over here (see touchmove), so it zooms the
+// photo rather than the page, while pinching anywhere else still zooms the
+// page as normal. Mouse panning rides
 // on pointer capture rather than a window-level listener, so there's nothing
 // to unregister when the modal closes -- it goes away with the image.
 function attachPhotoZoom(img) {

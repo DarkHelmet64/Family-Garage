@@ -1409,3 +1409,20 @@ input[type="file"] {
 .shopping-need.negative { color: var(--red); }
 
 .ok-line { color: var(--green); }
+
+/* iOS Safari zooms the whole page in when a field with text under 16px is
+   tapped, and leaves it zoomed after. Every field gets at least 16px on a
+   phone-width or touch screen instead -- rather than maximum-scale=1 on the
+   viewport, which would also take pinch-zoom away from anyone who needs it.
+   max() keeps any field that's deliberately bigger as it is. Kept last, and
+   listing the two rules above that shrink a field, so it wins over them; a
+   wide mouse-driven screen keeps their more compact sizes. */
+@media (max-width: 767px), (pointer: coarse) {
+  input,
+  select,
+  textarea,
+  .item-row input,
+  input[type="file"] {
+    font-size: max(16px, 1em);
+  }
+}
