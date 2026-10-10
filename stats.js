@@ -327,7 +327,21 @@ export function compareServices(a, b, ctx) {
 
 // Running low is a shelf at or below the level you said to keep. With no level
 // set, only actually running out counts.
+// What sort of thing a shelf item is, which decides how it's counted:
+//   count   - whole items: filters, bulbs, wiper blades
+//   measure - bought in containers, used in amounts: oil, coolant, fluids
+//   tool    - reusable: a torque wrench, jack stands -- never used up, so not
+//             counted off the shelf at all, only logged where it's been used
+// A part saved before kinds existed is measured if it was given a smaller
+// unit to be used in, and counted otherwise -- exactly how it already behaved.
+export function partKind(part) {
+  if (part && ["count", "measure", "tool"].includes(part.kind)) return part.kind;
+  return part && part.useUnit && part.useUnit !== part.unit && Number(part.unitsPerBuyUnit) > 0 ? "measure" : "count";
+}
+
 export function isLowStock(part) {
+  // A tool isn't used up, so it's never running low.
+  if (partKind(part) === "tool") return false;
   const quantity = Number(part.quantity) || 0;
   const floor = part.minQuantity == null ? 0 : Number(part.minQuantity);
   return quantity <= floor;

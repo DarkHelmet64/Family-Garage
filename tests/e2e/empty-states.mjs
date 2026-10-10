@@ -27,7 +27,7 @@ await page.goto(`${base}?purchases`, { waitUntil: "networkidle" });
 await page.waitForSelector("h1");
 await page.waitForTimeout(200);
 const purchasesText = await page.textContent("#purchases-list");
-check("an empty purchase log says so", /nothing logged yet/i.test(purchasesText));
+check("an empty purchase log says so", /nothing logged/i.test(purchasesText));
 
 report(app.errors);
 await app.close();

@@ -134,6 +134,9 @@ export function openPickerModal({ title, options, cancelLabel = "Cancel" }) {
 // ---------------------------------------------------------------------------
 
 export function openFormModal({ title, hint, fields, submitLabel = "Save", validate, destructive, secondaryAction }) {
+  // One quiet extra action under the buttons, or several -- a part's sheet
+  // offers both a recount and its history.
+  const secondaryActions = [secondaryAction].flat().filter(Boolean);
   return new Promise((resolve) => {
     const fieldHtml = fields.map((field) => renderField(field)).join("");
 
@@ -147,7 +150,9 @@ export function openFormModal({ title, hint, fields, submitLabel = "Save", valid
           <button class="secondary" id="form-cancel">Cancel</button>
           <button id="form-submit">${escapeHtml(submitLabel)}</button>
         </div>
-        ${secondaryAction ? `<button type="button" class="link-plain" id="form-secondary">${escapeHtml(secondaryAction.label)}</button>` : ""}
+        ${secondaryActions
+          .map((action, index) => `<button type="button" class="link-plain" data-form-secondary="${index}">${escapeHtml(action.label)}</button>`)
+          .join("")}
         ${destructive ? `<button class="link-danger" id="form-destructive">${escapeHtml(destructive.label)}</button>` : ""}
       `,
       { onDismiss: () => resolve(null) }
@@ -217,6 +222,10 @@ export function openFormModal({ title, hint, fields, submitLabel = "Save", valid
       const fire = () => field.onChange(input.value, overlay, listState);
       input.addEventListener("change", fire);
       input.addEventListener("input", fire);
+      // For a field whose value shapes the rest of the sheet -- a part's kind
+      // deciding which fields apply -- from the moment it opens, not only
+      // once it's changed.
+      if (field.fireOnOpen) fire();
     }
 
     const readValues = () => {
@@ -271,9 +280,9 @@ export function openFormModal({ title, hint, fields, submitLabel = "Save", valid
     // Unlike destructive, this doesn't close or resolve the sheet -- it's for
     // a read-only side trip (viewing history, say) that comes back to the
     // same in-progress edit rather than losing it.
-    if (secondaryAction) {
-      overlay.querySelector("#form-secondary").addEventListener("click", () => secondaryAction.onClick());
-    }
+    overlay.querySelectorAll("[data-form-secondary]").forEach((button) => {
+      button.addEventListener("click", () => secondaryActions[Number(button.dataset.formSecondary)].onClick());
+    });
     overlay.querySelectorAll("input").forEach((input) => {
       input.addEventListener("keydown", (e) => {
         if (e.key === "Enter") submit();
@@ -427,7 +436,9 @@ function partOptionsHtml(catalogue, selectedId, vehicleId) {
     `<option value="${escapeHtml(part.id)}" ${part.id === selectedId ? "selected" : ""}>${escapeHtml(part.name)} (${escapeHtml(String(part.quantity ?? 0))} ${escapeHtml(part.unit || "each")})</option>`;
 
   const fits = (part) => !(part.fitsVehicleIds || []).length || part.fitsVehicleIds.includes(vehicleId);
-  const offered = vehicleId ? catalogue.filter((part) => fits(part) || part.id === selectedId) : catalogue;
+  // Tools aren't used up, so there's nothing to book off the shelf for a job.
+  const stocked = catalogue.filter((part) => part.kind !== "tool" || part.id === selectedId);
+  const offered = vehicleId ? stocked.filter((part) => fits(part) || part.id === selectedId) : stocked;
 
   // An empty list is a dead end otherwise -- nothing to pick and no reason why.
   const placeholder = offered.length
@@ -442,12 +453,12 @@ function partOptionsHtml(catalogue, selectedId, vehicleId) {
 // entered and shown in this unit; only the buy-unit amount goes on the
 // record, so the shelf math on the far side never has to know a conversion
 // happened.
-const usageUnit = (part) =>
+export const usageUnit = (part) =>
   part.useUnit && part.useUnit !== part.unit && Number(part.unitsPerBuyUnit) > 0
     ? { unit: part.useUnit, perBuyUnit: Number(part.unitsPerBuyUnit) }
     : { unit: part.unit || "each", perBuyUnit: 1 };
-const toBuyUnits = (part, usageQty) => Number(usageQty) / usageUnit(part).perBuyUnit;
-const toUsageUnits = (part, buyQty) => Number(buyQty) * usageUnit(part).perBuyUnit;
+export const toBuyUnits = (part, usageQty) => Number(usageQty) / usageUnit(part).perBuyUnit;
+export const toUsageUnits = (part, buyQty) => Number(buyQty) * usageUnit(part).perBuyUnit;
 const round2 = (n) => Math.round(n * 100) / 100;
 
 function bindPartsField(overlay, field) {

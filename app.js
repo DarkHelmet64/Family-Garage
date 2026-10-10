@@ -16,11 +16,14 @@ import {
   serverTimestamp,
   writeBatch,
   increment,
+  query,
+  where,
 } from "https://www.gstatic.com/firebasejs/12.19.0/firebase-firestore.js";
 import { firebaseConfig } from "./firebase-config.js";
 
 import {
   isoToDate,
+  isoFromDate,
   formatUSD,
   formatPricePerGallon,
   dollarsToCents,
@@ -42,6 +45,9 @@ import {
   openFormModal,
   openQrModal,
   mpgChartSvg,
+  usageUnit,
+  toBuyUnits,
+  toUsageUnits,
 } from "./ui.js";
 import {
   computeFuelStats,
@@ -57,6 +63,7 @@ import {
   normalizeJob,
   lastDoneFor,
   isLowStock,
+  partKind,
   upcomingWork,
   shelfShortages,
   shortageVendors,
@@ -926,7 +933,7 @@ async function migratePartsReservations(vehicles) {
       // unreserved-but-marked-reserved if the two calls were ever split by
       // a lost connection or a closed tab in between.
       if (needed.length) {
-        await applyPartUsage([], needed);
+        await applyPartUsage([], needed, { vehicleId: vehicle.id, title: service.title });
         touched += 1;
       }
       await updateDoc(doc(db, "vehicles", vehicle.id, "services", service.id), { reserved: true });
@@ -1194,7 +1201,17 @@ function planRowHtml(row) {
 // each other's arithmetic.
 // ---------------------------------------------------------------------------
 
-const PART_UNITS = ["each", "qt", "gal", "L", "oz", "box", "set", "pair", "ft"];
+const PART_UNITS = ["each", "qt", "gal", "L", "oz", "box", "set", "pair", "ft", "jug", "bottle", "can", "tube", "bag", "case"];
+// What a measured item's amount is given in, as opposed to what it comes in.
+const MEASURE_UNITS = ["qt", "gal", "L", "oz", "ml", "lb", "ft"];
+
+// "2 jugs", "1 jug", "4 qt": a container or a pack reads in the plural, a
+// measure or "each" never does.
+const PLURAL_UNITS = { jug: "jugs", bottle: "bottles", can: "cans", tube: "tubes", bag: "bags", case: "cases", box: "boxes", set: "sets", pair: "pairs" };
+function unitText(quantity, unit) {
+  const name = unit || "each";
+  return Math.abs(quantity) === 1 || !PLURAL_UNITS[name] ? name : PLURAL_UNITS[name];
+}
 
 const PART_CATEGORIES = [
   "Filters",
@@ -1220,13 +1237,29 @@ function renderPartsView() {
       </div>
     </div>
     <p class="hint" id="parts-intro"></p>
+    <div class="shelf-tools" id="shelf-tools" hidden>
+      <input type="search" id="parts-search" placeholder="Search the shelf" autocomplete="off" />
+      <div class="check-row vendor-filter" id="parts-categories"></div>
+    </div>
     <div id="parts-list"><p class="loading">Loading…</p></div>
   `;
 
-  const state = { parts: [], vehicles: [], reserved: new Map() };
+  // `log` is each part's stock-log entries, newest first, for the line of
+  // recent history under it. `search` and `category` narrow what's shown.
+  const state = { parts: [], vehicles: [], reserved: new Map(), log: new Map(), search: "", category: null };
+  document.getElementById("parts-search").addEventListener("input", (event) => {
+    state.search = event.target.value;
+    draw();
+  });
   $app.addEventListener("click", (event) => {
     const target = event.target.closest("[data-act]");
     if (!target) return;
+    if (target.dataset.act === "filter-category") {
+      const category = target.dataset.id || null;
+      state.category = state.category === category ? null : category;
+      draw();
+      return;
+    }
     Promise.resolve(handlePartsAction(target.dataset.act, target.dataset.id, state)).catch(reportActionFailure);
   });
 
@@ -1255,18 +1288,15 @@ function renderPartsView() {
     },
     (err) => console.warn("Couldn't read the vehicle list", err)
   );
-  // Same reasoning as everywhere else this session's read-cost work touched:
-  // one collection-group query covers every vehicle's scheduled jobs, so
-  // showing how much of each part they've spoken for doesn't cost a read per
-  // vehicle. Only needed for that breakdown -- the shelf itself, same as the
-  // vehicle list above, renders fine without waiting on it.
-  onSnapshot(
-    collectionGroup(db, "services"),
-    (snap) => {
-      // A bad record here only costs the "reserved" breakdown, never the
+  // What's set aside for scheduled jobs, across every vehicle in one
+  // collection-group query. Only needed for that breakdown -- the shelf
+  // itself, same as the vehicle list above, renders fine without it.
+  watchScheduledServices(
+    (services) => {
+      // A bad record here only costs the "set aside" breakdown, never the
       // shelf itself.
       try {
-        state.reserved = reservedByPart(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+        state.reserved = reservedByPart(services);
       } catch (err) {
         console.warn("Couldn't work out what's reserved across the garage", err);
         state.reserved = new Map();
@@ -1274,6 +1304,17 @@ function renderPartsView() {
       if (state.parts.length) draw();
     },
     (err) => console.warn("Couldn't read what's reserved across the garage", err)
+  );
+  // Only for each row's line of recent history -- like the two above, the
+  // shelf draws without it -- so only the recent stretch of the log is read,
+  // not every entry ever made.
+  onSnapshot(
+    recentStockLog(),
+    (snap) => {
+      state.log = stockLogByPart(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+      if (state.parts.length) draw();
+    },
+    (err) => console.warn("Couldn't read the stock log", err)
   );
   onSnapshot(
     collection(db, "parts"),
@@ -1299,6 +1340,38 @@ function renderPartsView() {
   );
 }
 
+// Every scheduled job in the garage, live. Only scheduled ones are read --
+// a done job never sets anything aside, and they're most of the history --
+// which takes a collection-group index on `status` that a Firebase project
+// doesn't have until someone adds it (see the README). Until then Firestore
+// refuses the filtered query, and this falls back to reading every service,
+// which is what it always did: slower as the history grows, but right.
+function watchScheduledServices(onServices, onError) {
+  const toServices = (snap) => snap.docs.map((d) => ({ id: d.id, ...d.data() })).filter((s) => s.status !== "done");
+  onSnapshot(
+    query(collectionGroup(db, "services"), where("status", "==", "scheduled")),
+    (snap) => onServices(toServices(snap)),
+    (err) => {
+      if (err?.code !== "failed-precondition") return onError(err);
+      console.info("No collection-group index on services.status yet -- reading every service instead.", err.message);
+      onSnapshot(collectionGroup(db, "services"), (snap) => onServices(toServices(snap)), onError);
+    }
+  );
+}
+
+// How far back the shelf's history lines and the Purchases page look before
+// being asked for more: enough for what's recent, without reading every
+// entry the log has ever had on each visit.
+const RECENT_LOG_DAYS = 90;
+const recentStockLog = () =>
+  query(collection(db, "purchases"), where("purchasedOn", ">=", addDaysISO(todayISO(), -RECENT_LOG_DAYS)));
+
+function addDaysISO(iso, days) {
+  const date = isoToDate(iso);
+  date.setDate(date.getDate() + days);
+  return isoFromDate(date);
+}
+
 // What's already been typed into a field across the shelf, most common first,
 // so "Fram" doesn't become "fram" and "FRAM" on three different rows.
 function usedValues(parts, key) {
@@ -1317,22 +1390,30 @@ function usedValues(parts, key) {
 // there's more than one to group into. A shelf where nothing has been
 // categorised reads exactly as it always did, one flat list.
 function drawParts(listEl, state) {
+  drawShelfTools(state);
   if (!state.parts.length) {
     listEl.innerHTML = `<p class="empty small">Nothing on the shelf yet. Add the oil, filters and blades you keep
       around, and they can be booked against a service — which takes them back off the shelf.</p>`;
     return;
   }
 
+  const parts = visibleParts(state);
+  if (!parts.length) {
+    listEl.innerHTML = `<p class="empty small">Nothing on the shelf matches.</p>`;
+    return;
+  }
+
   const groups = new Map();
-  for (const part of state.parts) {
+  for (const part of parts) {
     const key = String(part.category || "").trim() || "";
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(part);
   }
 
-  const list = (parts) => `<div class="list">${parts.map((part) => partRowHtml(part, state.vehicles, state.reserved)).join("")}</div>`;
+  const list = (parts) =>
+    `<div class="list">${parts.map((part) => partRowHtml(part, state.vehicles, state.reserved, state.log.get(part.id))).join("")}</div>`;
   if (groups.size === 1 && groups.has("")) {
-    listEl.innerHTML = list(state.parts);
+    listEl.innerHTML = list(parts);
     return;
   }
 
@@ -1344,34 +1425,103 @@ function drawParts(listEl, state) {
     (groups.has("") ? `<div class="section-title">Uncategorised</div>${list(groups.get(""))}` : "");
 }
 
-function formatQuantity(part) {
-  const quantity = Number(part.quantity) || 0;
-  const rounded = Math.round(quantity * 100) / 100;
-  return `${rounded} ${part.unit || "each"}`;
+// The parts matching the search box and the picked category. The search
+// looks at everything a row shows about a part, so "PH7317", "fram" and
+// "filter" all find the same oil filter.
+function visibleParts(state) {
+  const words = state.search.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  return state.parts.filter((part) => {
+    if (state.category && String(part.category || "").trim() !== state.category) return false;
+    if (!words.length) return true;
+    const text = [part.name, part.brand, part.category, part.partNumber, part.modelNumber, part.size, part.vendor, part.notes]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase();
+    return words.every((word) => text.includes(word));
+  });
 }
 
-// `quantity` -- what formatQuantity shows -- is already net of anything
-// reserved: a job's parts come off the shelf the moment it's scheduled, not
-// when it's actually done. Nothing about that changes here; this is purely
-// the "why is it lower than I expected" context, on its own line rather than
-// packed into the bold figure itself, which needs to stay short enough not
-// to wrap oddly on a narrow phone.
+// The search box once there's a shelf to search, and a chip per category
+// once there's more than one to pick between.
+function drawShelfTools(state) {
+  document.getElementById("shelf-tools").hidden = !state.parts.length;
+  const categories = [...new Set(state.parts.map((part) => String(part.category || "").trim()).filter(Boolean))].sort((a, b) =>
+    a.localeCompare(b)
+  );
+  if (state.category && !categories.includes(state.category)) state.category = null;
+  document.getElementById("parts-categories").innerHTML =
+    categories.length > 1
+      ? `<button class="secondary small vendor-chip${state.category ? "" : " active"}" data-act="filter-category" data-id="">All</button>` +
+        categories
+          .map(
+            (category) =>
+              `<button class="secondary small vendor-chip${state.category === category ? " active" : ""}" data-act="filter-category" data-id="${escapeHtml(category)}">${escapeHtml(category)}</button>`
+          )
+          .join("")
+      : "";
+}
+
+// `quantity` defaults to the part's own count. A measured item with a size
+// given reads in both: "2.4 jugs · 12 qt".
+function formatQuantity(part, quantity = Number(part.quantity) || 0) {
+  if (partKind(part) === "tool") return "Reusable";
+  const rounded = roundQty(quantity);
+  const base = `${rounded} ${unitText(rounded, part.unit)}`;
+  const { unit: useIn, perBuyUnit } = usageUnit(part);
+  return perBuyUnit !== 1 ? `${base} · ${roundQty(quantity * perBuyUnit)} ${useIn}` : base;
+}
+
+// The bold figure is what's physically on the shelf. The stored `quantity`
+// is what's free -- a job's parts come off it the moment the job is
+// scheduled, which is what keeps the buy list and the low-stock flag honest --
+// so anything set aside is added back for the headline, and this line says
+// how it splits. On its own line rather than packed into the bold figure,
+// which needs to stay short enough not to wrap oddly on a narrow phone.
 function reservedLineHtml(part, reserved) {
   if (!reserved) return "";
-  const unit = part.unit || "each";
-  const roundedReserved = Math.round(reserved * 100) / 100;
-  const total = Math.round(((Number(part.quantity) || 0) + reserved) * 100) / 100;
-  return `<span class="row-meta">${escapeHtml(`${roundedReserved} ${unit} reserved for scheduled jobs · ${total} ${unit} total`)}</span>`;
+  const free = roundQty(Number(part.quantity) || 0);
+  const setAside = roundQty(reserved);
+  return `<span class="row-meta">${escapeHtml(
+    `${setAside} ${unitText(setAside, part.unit)} set aside for jobs · ${free} ${unitText(free, part.unit)} free`
+  )}</span>`;
 }
 
-function partRowHtml(part, vehicles = [], reservedByPartId = new Map()) {
+// Each part's stock-log entries, newest first.
+function stockLogByPart(entries) {
+  const byPart = new Map();
+  const sorted = [...entries].sort(
+    (a, b) =>
+      String(b.purchasedOn || "").localeCompare(String(a.purchasedOn || "")) ||
+      (b.createdAt?.toMillis?.() || 0) - (a.createdAt?.toMillis?.() || 0)
+  );
+  for (const entry of sorted) {
+    if (!entry.partId) continue;
+    if (!byPart.has(entry.partId)) byPart.set(entry.partId, []);
+    byPart.get(entry.partId).push(entry);
+  }
+  return byPart;
+}
+
+// The last couple of things that happened to a part, in a line: "Used on
+// Blue Odyssey, Oct 3 · Bought from NAPA, Sep 28". The full story is in its
+// history.
+function historyLineHtml(entries) {
+  if (!entries || !entries.length) return "";
+  const text = entries
+    .slice(0, 2)
+    .map((entry) => `${stockEntryLabel(entry)}, ${formatISO(entry.purchasedOn, { withYear: "auto" })}`)
+    .join(" · ");
+  return `<span class="row-meta history-line">${escapeHtml(text)}</span>`;
+}
+
+function partRowHtml(part, vehicles = [], reservedByPartId = new Map(), recent = []) {
   const low = isLowStock(part);
   const reserved = reservedByPartId.get(part.id) || 0;
   // Booking out more than the shelf held leaves a negative count. That's kept
   // rather than clamped -- it means the count was wrong, and hiding it would
   // lose the only evidence of that -- but it's shown as a discrepancy, not as
   // "running low".
-  const negative = (Number(part.quantity) || 0) < 0;
+  const negative = partKind(part) !== "tool" && (Number(part.quantity) || 0) < 0;
   const meta = [
     part.brand || null,
     part.partNumber ? `#${part.partNumber}` : null,
@@ -1398,15 +1548,15 @@ function partRowHtml(part, vehicles = [], reservedByPartId = new Map()) {
         ${meta ? `<span class="row-meta">${escapeHtml(meta)}</span>` : ""}
         ${fits.length ? `<span class="row-meta fits-line">Fits ${escapeHtml(fits.join(", "))}</span>` : ""}
         ${part.notes ? `<span class="row-note">${escapeHtml(part.notes)}</span>` : ""}
+        ${historyLineHtml(recent)}
       </div>
       <div class="row-side">
-        <span class="part-qty ${negative ? "negative" : low ? "low" : ""}">${escapeHtml(formatQuantity(part))}</span>
+        <span class="part-qty ${negative ? "negative" : low ? "low" : ""}">${escapeHtml(formatQuantity(part, (Number(part.quantity) || 0) + reserved))}</span>
         ${reservedLineHtml(part, reserved)}
-        ${negative ? `<span class="row-meta">more booked out than the shelf held — worth a recount</span>` : ""}
+        ${negative ? `<span class="row-meta">more set aside than the shelf holds — worth a recount</span>` : ""}
         <div class="row-actions">
+          <button class="ghost use-btn" data-act="use-part" data-id="${part.id}" title="Log what you used">Use</button>
           <button class="ghost" data-act="log-purchase" data-id="${part.id}" title="Log a purchase">🧾</button>
-          <button class="ghost" data-act="part-minus" data-id="${part.id}" title="Take one off the shelf">−</button>
-          <button class="ghost" data-act="part-plus" data-id="${part.id}" title="Put one back">+</button>
         </div>
       </div>
     </div>
@@ -1419,10 +1569,10 @@ function handlePartsAction(action, id, state) {
       return openPartForm(null, state);
     case "edit-part":
       return openPartForm(state.parts.find((part) => part.id === id) || null, state);
-    case "part-plus":
-      return adjustPartQuantity(id, 1);
-    case "part-minus":
-      return adjustPartQuantity(id, -1);
+    case "use-part": {
+      const part = state.parts.find((candidate) => candidate.id === id);
+      return part ? openUseForm(part, state) : null;
+    }
     case "log-purchase": {
       const part = state.parts.find((candidate) => candidate.id === id);
       return part ? openPurchaseForm(part, state) : null;
@@ -1435,35 +1585,75 @@ function handlePartsAction(action, id, state) {
   }
 }
 
-// A single atomic step, so tapping quickly -- or on two phones at once -- lands
-// every change rather than the last read winning.
-function adjustPartQuantity(partId, delta) {
-  return updateDoc(doc(db, "parts", partId), { quantity: increment(delta), updatedAt: serverTimestamp() });
+// ---------------------------------------------------------------------------
+// The stock log
+//
+// Every change to the shelf gets a dated entry saying what moved it: bought,
+// used, recounted, a starting count, or booked onto (or back off) a job. The
+// shelf's own `quantity` is still the running total, moved with an atomic
+// increment so two phones at once can't undo each other -- the log is what
+// says how it got there, so a count that's drifted can be traced rather than
+// just overwritten.
+//
+// Entries live in the `purchases` collection, which is where this log
+// started: a purchase is simply the "bought" kind, and an entry written
+// before kinds existed has none and is a purchase. Keeping one collection
+// means the Firestore rules already published cover every kind, rather than
+// a new collection every garage would be refused until its rules were
+// republished. The same reasoning names the date field: every entry's date
+// is `purchasedOn`, whatever kind it is.
+//
+// What the name and unit were at the time are copied onto the entry rather
+// than looked up from the part each time it's read, the same reasoning as a
+// service record's own parts list: renaming or removing the part later
+// shouldn't change what the log says happened.
+// ---------------------------------------------------------------------------
+
+// `change` is what the entry did to the shelf, signed, in the unit the part is
+// counted in; `quantity` is its size, always positive -- the purchase log's
+// own figure, and the one the rules check.
+async function logStock(part, { kind, change, on, ...rest }) {
+  await addDoc(collection(db, "purchases"), {
+    partId: part.id,
+    partName: part.name || "Part",
+    kind,
+    change,
+    quantity: Math.abs(change),
+    unit: part.unit || "each",
+    purchasedOn: on || todayISO(),
+    notes: null,
+    ...rest,
+    createdAt: serverTimestamp(),
+  });
+}
+
+// An entry from before kinds existed is a purchase -- it's all the log held.
+const isPurchase = (entry) => !entry.kind || entry.kind === "bought";
+
+// The shelf moves first and the log second -- if the log write then fails,
+// the shelf is still right, just missing its record, rather than a logged
+// change that never actually landed on the shelf.
+async function moveStock(part, change, entry) {
+  if (change) await updateDoc(doc(db, "parts", part.id), { quantity: increment(change), updatedAt: serverTimestamp() });
+  await logStock(part, { change, ...entry });
 }
 
 // ---------------------------------------------------------------------------
 // Purchases
-//
-// A dated log of what's actually been bought, separate from the shelf's own
-// quantity/cost -- which only ever say what's true right now. What the name,
-// unit and vendor were at the time are copied onto the entry rather than
-// looked up from the part each time it's read, the same reasoning as a
-// service record's own parts list: renaming or removing the part later
-// shouldn't change what the log says was bought.
 // ---------------------------------------------------------------------------
 
+// A tool isn't counted, so buying one is logged for what it cost without
+// moving any count.
 async function recordPurchase(part, payload) {
-  await addDoc(collection(db, "purchases"), {
-    partId: part.id,
-    partName: part.name,
+  await logStock(part, {
+    kind: "bought",
+    change: partKind(part) === "tool" ? 0 : payload.quantity,
     quantity: payload.quantity,
-    unit: part.unit || "each",
+    on: payload.purchasedOn,
     totalCents: payload.totalCents,
     unitCostCents: payload.totalCents && payload.quantity ? Math.round(payload.totalCents / payload.quantity) : null,
     vendor: payload.vendor || null,
-    purchasedOn: payload.purchasedOn,
     notes: payload.notes || null,
-    createdAt: serverTimestamp(),
   });
 }
 
@@ -1471,7 +1661,9 @@ async function recordPurchase(part, payload) {
 // the shelf is still correctly stocked, just missing its record, rather than
 // a logged purchase that never actually landed on the shelf.
 async function logPartPurchase(part, payload) {
-  await updateDoc(doc(db, "parts", part.id), { quantity: increment(payload.quantity), updatedAt: serverTimestamp() });
+  if (partKind(part) !== "tool") {
+    await updateDoc(doc(db, "parts", part.id), { quantity: increment(payload.quantity), updatedAt: serverTimestamp() });
+  }
   await recordPurchase(part, payload);
 }
 
@@ -1483,7 +1675,7 @@ async function openPurchaseForm(part, state) {
       { name: "purchasedOn", label: "Date", type: "date", half: true, value: todayISO() },
       {
         name: "quantity",
-        label: `Quantity (${part.unit || "each"})`,
+        label: partKind(part) === "tool" ? "How many" : `How many (${unitText(2, part.unit)})`,
         type: "number",
         step: "0.01",
         min: 0,
@@ -1530,6 +1722,132 @@ async function openPurchaseForm(part, state) {
   showToast("Purchase logged");
 }
 
+// Using something straight off the shelf -- topping up washer fluid, a few
+// rags -- without it having to be part of a service record. The amount is
+// asked in whatever unit the part is used in; the shelf moves in the unit it's
+// counted in.
+async function openUseForm(part, state) {
+  const tool = partKind(part) === "tool";
+  const { unit: useIn } = usageUnit(part);
+  const onShelf = Math.round(toUsageUnits(part, physicalQuantity(part, state)) * 100) / 100;
+  const vehicles = state.vehicles || [];
+  const values = await openFormModal({
+    title: `Use ${part.name}`,
+    hint: tool ? "Logs where it was used. A tool isn't used up, so nothing comes off the shelf." : `${onShelf} ${useIn} on the shelf.`,
+    fields: [
+      { name: "usedOn", label: "Date", type: "date", half: true, value: todayISO() },
+      tool ? null : {
+        name: "amount",
+        label: `How much (${useIn})`,
+        type: "number",
+        step: "0.01",
+        min: 0,
+        inputmode: "decimal",
+        half: true,
+        value: "1",
+      },
+      vehicles.length
+        ? {
+            name: "vehicleId",
+            label: "On (optional)",
+            type: "select",
+            value: "",
+            options: [{ value: "", label: "— nothing in particular —" }, ...vehicles.map((v) => ({ value: v.id, label: v.name }))],
+          }
+        : null,
+      { name: "notes", label: "Notes (optional)", type: "text", placeholder: "Topped off" },
+    ].filter(Boolean),
+    submitLabel: "Log it",
+    validate: (v) => (tool || Number(v.amount) > 0 ? null : "How much did you use?"),
+  });
+  if (!values) return;
+
+  const amount = tool ? null : Number(values.amount);
+  await moveStock(part, tool ? 0 : -toBuyUnits(part, amount), {
+    kind: "used",
+    on: values.usedOn,
+    amount,
+    amountUnit: tool ? null : useIn,
+    vehicleId: values.vehicleId || null,
+    vehicleName: vehicles.find((v) => v.id === values.vehicleId)?.name || null,
+    notes: values.notes || null,
+  });
+  showToast("Logged");
+}
+
+// Saying what's actually on the shelf, rather than typing over the stored
+// figure: the difference goes in the log, so a count that drifted stays
+// visible as a recount instead of quietly disappearing. Parts set aside for
+// scheduled jobs are still physically there, so they're counted too -- the
+// question is what's on the shelf, not what's free.
+async function openRecountForm(part, state) {
+  const reserved = (state.reserved && state.reserved.get(part.id)) || 0;
+  const unit = part.unit || "each";
+  const current = physicalQuantity(part, state);
+  const values = await openFormModal({
+    title: `Recount ${part.name}`,
+    hint: `The app thinks ${roundQty(current)} ${unit}${
+      reserved ? `, including ${roundQty(reserved)} ${unit} set aside for scheduled jobs` : ""
+    }.`,
+    fields: [
+      {
+        name: "counted",
+        label: `On the shelf right now (${unit})`,
+        type: "number",
+        step: "0.01",
+        min: 0,
+        inputmode: "decimal",
+        value: String(roundQty(current)),
+      },
+      { name: "notes", label: "Notes (optional)", type: "text", placeholder: "Found a spare in the van" },
+    ],
+    submitLabel: "Save count",
+    validate: (v) => (v.counted !== "" && Number(v.counted) >= 0 ? null : "How many are there?"),
+  });
+  if (!values) return;
+
+  const counted = Number(values.counted);
+  const change = roundQty(counted - current);
+  if (!change) {
+    showToast("Count matches");
+    return;
+  }
+  await moveStock(part, change, { kind: "recount", countedTo: counted, notes: values.notes || null });
+  showToast("Count updated");
+}
+
+const roundQty = (n) => Math.round((Number(n) || 0) * 100) / 100;
+
+// What's physically on the shelf: the stored quantity is what's free, since
+// booking a part onto a scheduled job takes it off straight away, so anything
+// set aside is added back.
+function physicalQuantity(part, state) {
+  return (Number(part.quantity) || 0) + ((state.reserved && state.reserved.get(part.id)) || 0);
+}
+
+// How a log entry reads, in a few words.
+function stockEntryLabel(entry) {
+  switch (entry.kind) {
+    case "used":
+      return entry.vehicleName ? `Used on ${entry.vehicleName}` : "Used";
+    case "recount":
+      return entry.countedTo != null ? `Recounted to ${roundQty(entry.countedTo)}` : "Recounted";
+    case "start":
+      return "Starting count";
+    case "job":
+      return entry.change < 0 ? `Booked onto ${entry.serviceTitle || "a job"}` : `Back from ${entry.serviceTitle || "a job"}`;
+    default:
+      return entry.vendor ? `Bought from ${entry.vendor}` : "Bought";
+  }
+}
+
+function stockChangeText(entry) {
+  if (entry.kind === "used" && entry.amount == null && !entry.change) return "";
+  if (entry.kind === "used" && entry.amount != null) return `−${roundQty(entry.amount)} ${entry.amountUnit || entry.unit || "each"}`;
+  const change = entry.change != null ? Number(entry.change) : Number(entry.quantity) || 0;
+  return `${change < 0 ? "−" : "+"}${roundQty(Math.abs(change))} ${entry.unit || "each"}`;
+}
+
 // What "start from an existing part" loads into the rest of the sheet --
 // everything about the product, not the batch. Quantity is left alone: it's
 // how much of this new batch is on the shelf, not something to copy. An
@@ -1542,6 +1860,7 @@ function fillPartTemplate(overlay, part) {
     if (input) input.value = value;
   };
   set("name", part?.name || "");
+  set("kind", part ? partKind(part) : "count");
   set("brand", part?.brand || "");
   set("category", part?.category || "");
   set("partNumber", part?.partNumber || "");
@@ -1558,6 +1877,7 @@ function fillPartTemplate(overlay, part) {
   overlay.querySelectorAll('[data-check="fitsVehicleIds"]').forEach((box) => {
     box.checked = fits.has(box.value);
   });
+  applyPartKind(overlay);
 }
 
 // A part's own history: what's been bought (the purchase log) and where
@@ -1568,14 +1888,18 @@ function fillPartTemplate(overlay, part) {
 // list in memory before it's actually asked for.
 async function openPartHistory(part, state) {
   const [purchasesSnap, servicesSnap] = await Promise.all([
-    getDocs(collection(db, "purchases")),
+    getDocs(query(collection(db, "purchases"), where("partId", "==", part.id))),
     getDocs(collectionGroup(db, "services")),
   ]);
 
-  const bought = purchasesSnap.docs
+  const entries = purchasesSnap.docs
     .map((d) => ({ id: d.id, ...d.data() }))
-    .filter((purchase) => purchase.partId === part.id)
+    .filter((entry) => entry.partId === part.id)
     .sort((a, b) => String(b.purchasedOn || "").localeCompare(String(a.purchasedOn || "")));
+  const bought = entries.filter(isPurchase);
+  // Everything else that moved the shelf by hand. Jobs are left to "Used on"
+  // below, which reads them from the service records themselves.
+  const adjusted = entries.filter((entry) => !isPurchase(entry) && entry.kind !== "job");
 
   // The same question currentlyReserved always answers: what's actually been
   // taken off the shelf for this record, not just what it lists -- a
@@ -1604,6 +1928,15 @@ async function openPartHistory(part, state) {
       </div>`;
   };
 
+  const adjustedRowHtml = (entry) => `
+      <div class="row">
+        <div class="row-main">
+          <span class="row-title-text">${escapeHtml(stockEntryLabel(entry))}</span>
+          <span class="row-meta">${escapeHtml([formatISO(entry.purchasedOn), entry.notes].filter(Boolean).join(" · "))}</span>
+        </div>
+        <div class="row-side"><span class="part-qty">${escapeHtml(stockChangeText(entry))}</span></div>
+      </div>`;
+
   const usedRowHtml = ({ service, used }) => {
     const done = service.status === "done";
     const when = done ? service.servicedOn : service.dueOn;
@@ -1621,16 +1954,73 @@ async function openPartHistory(part, state) {
 
   const overlay = buildModal(`
     <h2>${escapeHtml(part.name)}</h2>
-    <p class="hint">${escapeHtml(formatQuantity(part))} on the shelf${part.vendor ? ` · from ${part.vendor}` : ""}${part.unitCostCents ? ` · ${escapeHtml(formatUSD(part.unitCostCents))} each` : ""}</p>
+    <p class="hint">${escapeHtml(partKind(part) === "tool" ? "Reusable" : `${formatQuantity(part)} on the shelf`)}${part.vendor ? ` · from ${part.vendor}` : ""}${part.unitCostCents ? ` · ${escapeHtml(formatUSD(part.unitCostCents))} each` : ""}</p>
     <div class="section-title">Bought${bought.length ? ` (${bought.length})` : ""}</div>
     ${bought.length ? `<div class="list">${bought.map(boughtRowHtml).join("")}</div>` : `<p class="empty small">Nothing logged yet.</p>`}
-    <div class="section-title">Used on${usedOn.length ? ` (${usedOn.length})` : ""}</div>
+    ${
+      adjusted.length
+        ? `<div class="section-title">Used &amp; recounted (${adjusted.length})</div><div class="list">${adjusted.map(adjustedRowHtml).join("")}</div>`
+        : ""
+    }
+    <div class="section-title">Used on jobs${usedOn.length ? ` (${usedOn.length})` : ""}</div>
     ${usedOn.length ? `<div class="list">${usedOn.map(usedRowHtml).join("")}</div>` : `<p class="empty small">Not used on anything yet.</p>`}
     <div class="modal-actions">
       <button id="history-close">Close</button>
     </div>
   `);
   overlay.querySelector("#history-close").addEventListener("click", () => overlay.remove());
+}
+
+// Shows the part sheet's fields for the kind picked, worded for it: a counted
+// item has a unit and a count; a measured one comes in a container holding
+// so much of something; a tool has neither. Hidden fields are ignored on save.
+// Called with no kind to re-word for a changed unit.
+function applyPartKind(overlay, kind = overlay.querySelector('[data-field="kind"]')?.value || "count") {
+  const value = (name) => overlay.querySelector(`[data-field="${name}"]`)?.value || "";
+  const fieldEl = (name) => overlay.querySelector(`[data-field="${name}"]`)?.closest(".field");
+  const show = (name, visible) => {
+    const el = fieldEl(name);
+    if (el) el.hidden = !visible;
+  };
+  const label = (name, text) => {
+    const el = fieldEl(name)?.querySelector("label");
+    if (el) el.textContent = text;
+  };
+  const hint = (name, text) => {
+    const el = fieldEl(name);
+    if (!el) return;
+    let hintEl = el.querySelector(".field-hint");
+    if (!hintEl) {
+      hintEl = document.createElement("span");
+      hintEl.className = "field-hint";
+      el.appendChild(hintEl);
+    }
+    hintEl.textContent = text;
+    hintEl.hidden = !text;
+  };
+
+  const tool = kind === "tool";
+  const measure = kind === "measure";
+  for (const name of ["unit", "quantity", "minQuantity"]) show(name, !tool);
+  show("useUnit", measure);
+  show("unitsPerBuyUnit", measure && !!value("useUnit"));
+
+  const unit = value("unit") || "each";
+  const units = unitText(2, unit);
+  if (measure) {
+    label("unit", "Comes in");
+    label("useUnit", "Measured in (optional)");
+    hint("useUnit", "Leave blank to count it by the " + unit + ".");
+    label("unitsPerBuyUnit", `How many ${value("useUnit") || "of it"} in one ${unit}`);
+    label("quantity", `On the shelf now (${units})`);
+    label("minQuantity", `Running low at (${units}, optional)`);
+    label("unitCost", `Cost per ${unit} (optional)`);
+  } else {
+    label("unit", "Counted in");
+    label("quantity", "On the shelf now");
+    label("minQuantity", "Running low at (optional)");
+    label("unitCost", tool ? "Cost (optional)" : "Cost each (optional)");
+  }
 }
 
 async function openPartForm(existing, state) {
@@ -1661,6 +2051,19 @@ async function openPartForm(existing, state) {
     fields: [
       copyFromField,
       { name: "name", label: "Part or supply", type: "text", value: existing?.name || "", placeholder: "Oil filter" },
+      {
+        name: "kind",
+        label: "What kind of thing is it?",
+        type: "select",
+        value: existing ? partKind(existing) : "count",
+        options: [
+          { value: "count", label: "Counted — filters, bulbs, blades" },
+          { value: "measure", label: "Measured — oil, coolant, fluids" },
+          { value: "tool", label: "Reusable — tools, jack stands" },
+        ],
+        fireOnOpen: true,
+        onChange: (kind, overlay) => applyPartKind(overlay, kind),
+      },
       {
         name: "brand",
         label: "Brand (optional)",
@@ -1722,37 +2125,43 @@ async function openPartForm(existing, state) {
         half: true,
         value: existing?.unit || "each",
         options: PART_UNITS.map((unit) => ({ value: unit, label: unit })),
+        onChange: (_unit, overlay) => applyPartKind(overlay),
       },
-      {
-        name: "quantity",
-        label: "On the shelf",
-        type: "number",
-        step: "0.01",
-        inputmode: "decimal",
-        half: true,
-        value: existing ? String(existing.quantity ?? 0) : "",
-        placeholder: "4",
-      },
+      // Only asked when adding: after that the count moves through Use,
+      // purchases and Recount, each of which leaves a log entry, rather than
+      // being typed over here.
+      existing
+        ? null
+        : {
+            name: "quantity",
+            label: "On the shelf now",
+            type: "number",
+            step: "0.01",
+            inputmode: "decimal",
+            half: true,
+            value: "",
+            placeholder: "4",
+          },
       {
         name: "useUnit",
         label: "Used in (optional)",
         type: "select",
         half: true,
         value: existing?.useUnit || "",
-        options: [{ value: "", label: "Same as counted in" }, ...PART_UNITS.map((unit) => ({ value: unit, label: unit }))],
-        hint: "Pick this when it's dispensed smaller than it's bought -- oil by the quart out of a case, coolant by the ounce out of a jug.",
+        options: [{ value: "", label: "Same as it comes in" }, ...MEASURE_UNITS.map((unit) => ({ value: unit, label: unit }))],
+        onChange: (_unit, overlay) => applyPartKind(overlay),
       },
       {
         name: "unitsPerBuyUnit",
-        label: "Conversion (optional)",
+        label: "How much in one (optional)",
         type: "number",
         step: "0.01",
         inputmode: "decimal",
         min: 0,
         half: true,
         value: existing?.unitsPerBuyUnit != null ? String(existing.unitsPerBuyUnit) : "",
-        placeholder: "128",
-        hint: "How many of that unit make one you're counted in -- 128 oz to a gal, 4 qt to a gal.",
+        placeholder: "5",
+        onChange: (_size, overlay) => applyPartKind(overlay),
       },
       {
         name: "minQuantity",
@@ -1764,7 +2173,7 @@ async function openPartForm(existing, state) {
         half: true,
         value: existing?.minQuantity != null ? String(existing.minQuantity) : "",
         placeholder: "1",
-        hint: "Flags the item as running low once the shelf drops to this.",
+        hint: "Flags it as running low once the shelf drops to this.",
       },
       {
         name: "unitCost",
@@ -1788,13 +2197,26 @@ async function openPartForm(existing, state) {
       { name: "notes", label: "Notes (optional)", type: "text", value: existing?.notes || "", placeholder: "Bought two at a time" },
     ].filter(Boolean),
     submitLabel: existing ? "Save changes" : "Add it",
-    secondaryAction: existing ? { label: "View purchase & usage history", onClick: () => openPartHistory(existing, state) } : null,
+    hint:
+      existing && partKind(existing) !== "tool"
+        ? `${formatQuantity(existing, physicalQuantity(existing, state))} on the shelf. To change the count, use Recount below.`
+        : null,
+    secondaryAction: existing
+      ? [
+          partKind(existing) !== "tool"
+            ? { label: "Recount what's on the shelf", onClick: () => openRecountForm(existing, state) }
+            : null,
+          { label: "View purchase & usage history", onClick: () => openPartHistory(existing, state) },
+        ]
+      : null,
     destructive: existing ? { label: "Remove from the parts list" } : null,
     validate: (v) => {
       if (!v.name) return "What is it called?";
+      if (v.kind === "tool") return null;
       if (v.quantity && !Number.isFinite(Number(v.quantity))) return "That quantity doesn't look like a number.";
-      if (v.useUnit && v.useUnit === v.unit) return "Pick a different unit than what it's counted in, or leave this blank.";
-      if (v.useUnit && !(Number(v.unitsPerBuyUnit) > 0)) return "Say how many of that unit make one you're counted in.";
+      if (v.kind !== "measure") return null;
+      if (v.useUnit && v.useUnit === v.unit) return "Pick a different unit than it comes in, or leave this blank.";
+      if (v.useUnit && !(Number(v.unitsPerBuyUnit) > 0)) return `Say how many ${v.useUnit} are in one ${v.unit}.`;
       return null;
     },
   });
@@ -1813,8 +2235,13 @@ async function openPartForm(existing, state) {
     return;
   }
 
+  // Only what the kind uses is kept: a counted item has no second unit, and a
+  // tool has no count, unit or low-stock floor at all.
+  const kind = values.kind || "count";
+  const measured = kind === "measure" && values.useUnit;
   const payload = {
     name: values.name,
+    kind,
     brand: values.brand || null,
     category: values.category || null,
     modelNumber: values.modelNumber || null,
@@ -1822,11 +2249,10 @@ async function openPartForm(existing, state) {
     vendor: values.vendor || null,
     fitsVehicleIds: values.fitsVehicleIds || [],
     partNumber: values.partNumber || null,
-    unit: values.unit || "each",
-    quantity: values.quantity ? Number(values.quantity) : 0,
-    useUnit: values.useUnit || null,
-    unitsPerBuyUnit: values.useUnit ? Number(values.unitsPerBuyUnit) : null,
-    minQuantity: values.minQuantity ? Number(values.minQuantity) : null,
+    unit: kind === "tool" ? "each" : values.unit || "each",
+    useUnit: measured ? values.useUnit : null,
+    unitsPerBuyUnit: measured ? Number(values.unitsPerBuyUnit) : null,
+    minQuantity: kind !== "tool" && values.minQuantity ? Number(values.minQuantity) : null,
     unitCostCents: values.unitCost ? dollarsToCents(values.unitCost) : null,
     notes: values.notes || null,
     updatedAt: serverTimestamp(),
@@ -1835,22 +2261,13 @@ async function openPartForm(existing, state) {
   if (existing) {
     await updateDoc(doc(db, "parts", existing.id), payload);
   } else {
-    const ref = await addDoc(collection(db, "parts"), { ...payload, createdAt: serverTimestamp() });
-    // The starting count on a brand-new part is itself a purchase -- log it
-    // the same way restocking one later does, just without a second shelf
-    // adjustment, since addDoc above already set the quantity directly.
-    if (payload.quantity > 0) {
-      await recordPurchase(
-        { id: ref.id, name: payload.name, unit: payload.unit },
-        {
-          quantity: payload.quantity,
-          totalCents: payload.unitCostCents ? payload.unitCostCents * payload.quantity : null,
-          vendor: payload.vendor,
-          purchasedOn: todayISO(),
-          notes: null,
-        }
-      );
-    }
+    const quantity = kind !== "tool" && values.quantity ? Number(values.quantity) : 0;
+    const ref = await addDoc(collection(db, "parts"), { ...payload, quantity, createdAt: serverTimestamp() });
+    // What was already on hand is logged as a starting count, not a purchase:
+    // it may have been bought years ago, and the purchase log is what was
+    // spent. Logged without a second shelf adjustment, since addDoc above
+    // already set the quantity.
+    if (quantity) await logStock({ id: ref.id, ...payload }, { kind: "start", change: quantity });
   }
   showToast(existing ? "Part updated" : "Added to the shelf");
 }
@@ -1869,39 +2286,55 @@ function renderPurchasesView() {
     <div id="purchases-list"><p class="loading">Loading…</p></div>
   `;
 
-  const state = { purchases: [] };
+  // The last RECENT_LOG_DAYS to start with, rather than every purchase ever
+  // logged on every visit; "Show older" swaps in the whole log.
+  const state = { purchases: [], all: false };
+  const listEl = document.getElementById("purchases-list");
+  let unsubscribe = () => {};
+  const watch = () => {
+    unsubscribe();
+    unsubscribe = onSnapshot(
+      state.all ? collection(db, "purchases") : recentStockLog(),
+      (snap) => {
+        state.purchases = snap.docs.map((d) => ({ id: d.id, ...d.data() })).filter(isPurchase);
+        state.purchases.sort((a, b) => String(b.purchasedOn || "").localeCompare(String(a.purchasedOn || "")));
+        drawPurchases(listEl, state);
+      },
+      (err) => {
+        listEl.innerHTML = `<p class="empty">Couldn't load the purchase log.<br /><span class="hint">${escapeHtml(err.message)}</span></p>`;
+      }
+    );
+  };
+
   $app.addEventListener("click", (event) => {
     const target = event.target.closest("[data-act]");
     if (!target) return;
+    if (target.dataset.act === "show-older-purchases") {
+      state.all = true;
+      watch();
+      return;
+    }
     Promise.resolve(handlePurchasesAction(target.dataset.act, target.dataset.id, state)).catch(reportActionFailure);
   });
-
-  const listEl = document.getElementById("purchases-list");
-  onSnapshot(
-    collection(db, "purchases"),
-    (snap) => {
-      state.purchases = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-      state.purchases.sort((a, b) => String(b.purchasedOn || "").localeCompare(String(a.purchasedOn || "")));
-      drawPurchases(listEl, state);
-    },
-    (err) => {
-      listEl.innerHTML = `<p class="empty">Couldn't load the purchase log.<br /><span class="hint">${escapeHtml(err.message)}</span></p>`;
-    }
-  );
+  watch();
 }
 
 function drawPurchases(listEl, state) {
   const introEl = document.getElementById("purchases-intro");
+  const span = state.all ? "" : ` in the last ${RECENT_LOG_DAYS} days`;
+  const older = state.all
+    ? ""
+    : `<button class="secondary small show-older" data-act="show-older-purchases">Show older purchases</button>`;
   if (!state.purchases.length) {
     introEl.textContent = "";
-    listEl.innerHTML = `<p class="empty small">Nothing logged yet.</p>`;
+    listEl.innerHTML = `<p class="empty small">Nothing logged${span}.</p>${older}`;
     return;
   }
   const totalCents = state.purchases.reduce((sum, purchase) => sum + (purchase.totalCents || 0), 0);
-  introEl.textContent = `${state.purchases.length} purchase${state.purchases.length === 1 ? "" : "s"}${
+  introEl.textContent = `${state.purchases.length} purchase${state.purchases.length === 1 ? "" : "s"}${span}${
     totalCents ? ` · ${formatUSD(totalCents)} total` : ""
   }`;
-  listEl.innerHTML = `<div class="list">${state.purchases.map(purchaseRowHtml).join("")}</div>`;
+  listEl.innerHTML = `<div class="list">${state.purchases.map(purchaseRowHtml).join("")}</div>${older}`;
 }
 
 function purchaseRowHtml(purchase) {
@@ -1946,8 +2379,11 @@ async function confirmDeletePurchase(purchase) {
 }
 
 async function deletePurchase(purchase) {
+  // What the purchase actually added -- nothing, for a tool. An entry from
+  // before `change` existed added its whole quantity.
+  const added = purchase.change != null ? Number(purchase.change) : Number(purchase.quantity) || 0;
   try {
-    await updateDoc(doc(db, "parts", purchase.partId), { quantity: increment(-purchase.quantity), updatedAt: serverTimestamp() });
+    if (added) await updateDoc(doc(db, "parts", purchase.partId), { quantity: increment(-added), updatedAt: serverTimestamp() });
   } catch (err) {
     // The part itself may have been removed from the shelf since -- the log
     // entry still goes, there's just no shelf left to put it back onto.
@@ -2971,7 +3407,7 @@ async function openScheduleServiceForm(state, existing, odometerMiles) {
       partsNeeded,
       reserved: true,
     });
-    await applyPartUsage(before, partsNeeded);
+    await applyPartUsage(before, partsNeeded, { vehicleId: state.id, title: values.title });
     showToast("Service updated");
   } else {
     const titles = (values.titles || []).map((item) => item.title).filter(Boolean);
@@ -2992,7 +3428,7 @@ async function openScheduleServiceForm(state, existing, odometerMiles) {
         })
       )
     );
-    await applyPartUsage([], values.partsNeeded || []);
+    await applyPartUsage([], values.partsNeeded || [], { vehicleId: state.id, title: titles[0] });
     showToast(titles.length > 1 ? `${titles.length} services scheduled` : "Service scheduled");
   }
   await recomputeSummary(state.id);
@@ -3228,7 +3664,7 @@ async function openCompletedServiceForm(state, existing, odometerMiles, { comple
   const partsBefore = combining
     ? [...(existing?.parts || []), ...combining.flatMap((record) => record.parts || [])]
     : currentlyReserved(existing);
-  await applyPartUsage(partsBefore, partsUsed);
+  await applyPartUsage(partsBefore, partsUsed, { vehicleId: state.id, title: payload.title, on: values.servicedOn });
 
   const services = collection(db, "vehicles", state.id, "services");
   let serviceId;
@@ -3260,7 +3696,7 @@ async function openCompletedServiceForm(state, existing, odometerMiles, { comple
     // Each one had already reserved its own parts when it was booked --
     // releasing that here, per record, is what the combined deduction above
     // is actually being weighed against.
-    await applyPartUsage(currentlyReserved(record), []);
+    await applyPartUsage(currentlyReserved(record), [], { vehicleId: state.id, title: record.title });
     await deleteServicePhotos(state.id, record.id);
     await deleteDoc(doc(db, "vehicles", state.id, "services", record.id));
   }
@@ -3345,7 +3781,7 @@ async function deleteService(state, id) {
   const removed = state.services.find((service) => service.id === id);
   // Whatever it took off the shelf goes back on -- a done record's actual
   // usage, or a still-open one's reservation, whichever this one has.
-  await applyPartUsage(currentlyReserved(removed), []);
+  await applyPartUsage(currentlyReserved(removed), [], { vehicleId: state.id, title: removed.title });
   await deleteServicePhotos(state.id, id);
   await deleteDoc(doc(db, "vehicles", state.id, "services", id));
   await recomputeSummary(state.id);
@@ -3729,7 +4165,7 @@ async function bookScheduleEntry(vehicleId, entry, services, { partsNeeded = [] 
   });
   // The schedule entry's parts list is only a default until this moment --
   // booking the job is what actually reserves it off the shelf.
-  await applyPartUsage([], partsNeeded);
+  await applyPartUsage([], partsNeeded, { vehicleId, title: entry.title });
   await recomputeSummary(vehicleId);
   showToast(`${entry.title} added to the service list`);
   return { id: added.id, ...payload };
@@ -3754,8 +4190,14 @@ async function bookPlanEntry(state, id) {
 // it books now. Every change is an atomic increment on its own part document,
 // so nothing here depends on reading a quantity first -- two people logging
 // service at the same time each get their subtraction.
-async function applyPartUsage(before, after) {
+//
+// `job` says which vehicle and service this was, for the stock log: each part
+// the shelf moved for gets an entry naming the job, so a part's history shows
+// where it went without anyone having to log it twice.
+async function applyPartUsage(before, after, job = {}) {
   const deltas = new Map();
+  const names = new Map();
+  for (const used of [...before, ...after]) if (used.partId && used.name) names.set(used.partId, used.name);
   for (const used of before) deltas.set(used.partId, (deltas.get(used.partId) || 0) + Number(used.quantity || 0));
   for (const used of after) deltas.set(used.partId, (deltas.get(used.partId) || 0) - Number(used.quantity || 0));
 
@@ -3767,7 +4209,21 @@ async function applyPartUsage(before, after) {
       // A part deleted from the list since is the usual reason; the record
       // still says what it used.
       console.warn("Couldn't adjust the shelf for a part", partId, err);
+      continue;
     }
+    // The log is a nicety on top of the shelf move, never a reason for the
+    // job's own save to fail.
+    await logStock(
+      { id: partId, name: names.get(partId) },
+      {
+        kind: "job",
+        change: delta,
+        on: job.on,
+        vehicleId: job.vehicleId || null,
+        serviceTitle: job.title || null,
+        unit: [...before, ...after].find((used) => used.partId === partId)?.unit || "each",
+      }
+    ).catch((err) => console.warn("Couldn't log a job's parts", partId, err));
   }
 }
 
