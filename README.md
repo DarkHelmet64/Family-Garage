@@ -273,7 +273,13 @@ Tap **🔧 Add service** at the top of the page for either:
   its own. With more than one job listed, each part row asks which job it's
   for, and goes on that job's record (one left unpicked goes on the first).
   Logging those jobs later as one visit keeps each part on its own job, and a
-  part's history names the job it went on. Nothing about it has
+  part's history names the job it went on. Visits saved before parts
+  recorded their job can be filled in from **More → Fill in which job parts
+  went on** on the garage screen: it matches a part to a job only where that
+  job's usual parts or your other finished visits point to exactly one, says
+  what it found before changing anything, lists what it couldn't settle for
+  you to pick by hand (open the visit, choose under **Parts used**), and never
+  moves a count. Nothing about it has
   to come from the [service schedule](#the-service-schedule) — the schedule
   is for jobs that come round on an interval; this is for the one-off — the
   belt that started squealing, the recall letter, the thing you noticed on
