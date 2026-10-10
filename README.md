@@ -556,12 +556,15 @@ always what's actually still there, spoken for or not, and [the buy
 list](#whats-coming-up) is read straight off that number rather than worked
 out from what any job says it'll need someday.
 
-A row with something reserved says so right there: the bold figure is still
-what's free to use, same as it's always been, with a second line underneath
-it — **5 qt reserved for scheduled jobs · 8 qt total** — so a number that
-looks low has its explanation right on the shelf instead of sending you off
-to dig through scheduled jobs to find it. A part with nothing reserved
-against it shows exactly as it always did, nothing added.
+The bold figure on each row is what's **physically on the shelf**. When some
+of it is set aside for scheduled jobs, the line under it says how it splits —
+**5 qt set aside for jobs · 3 qt free** — and the running-low flag and the buy
+list go by what's free, so a job you've booked still prompts you to restock
+in time. A part with nothing set aside shows just the one figure.
+
+Under each part's name is a line of its recent history — **Used on Blue
+Odyssey, Oct 3 · Bought from NAPA, Sep 28** — from [the stock
+log](#the-stock-log). The full story is in its history.
 
 Give things categories and the shelf sorts itself into them, named categories
 first and anything without one at the end. Categorise nothing and it stays the

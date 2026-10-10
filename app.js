@@ -1237,7 +1237,9 @@ function renderPartsView() {
     <div id="parts-list"><p class="loading">Loading…</p></div>
   `;
 
-  const state = { parts: [], vehicles: [], reserved: new Map() };
+  // `log` is each part's stock-log entries, newest first, for the line of
+  // recent history under it.
+  const state = { parts: [], vehicles: [], reserved: new Map(), log: new Map() };
   $app.addEventListener("click", (event) => {
     const target = event.target.closest("[data-act]");
     if (!target) return;
@@ -1288,6 +1290,16 @@ function renderPartsView() {
       if (state.parts.length) draw();
     },
     (err) => console.warn("Couldn't read what's reserved across the garage", err)
+  );
+  // Only for each row's line of recent history -- like the two above, the
+  // shelf draws without it.
+  onSnapshot(
+    collection(db, "purchases"),
+    (snap) => {
+      state.log = stockLogByPart(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+      if (state.parts.length) draw();
+    },
+    (err) => console.warn("Couldn't read the stock log", err)
   );
   onSnapshot(
     collection(db, "parts"),
@@ -1344,7 +1356,8 @@ function drawParts(listEl, state) {
     groups.get(key).push(part);
   }
 
-  const list = (parts) => `<div class="list">${parts.map((part) => partRowHtml(part, state.vehicles, state.reserved)).join("")}</div>`;
+  const list = (parts) =>
+    `<div class="list">${parts.map((part) => partRowHtml(part, state.vehicles, state.reserved, state.log.get(part.id))).join("")}</div>`;
   if (groups.size === 1 && groups.has("")) {
     listEl.innerHTML = list(state.parts);
     return;
@@ -1368,28 +1381,57 @@ function formatQuantity(part, quantity = Number(part.quantity) || 0) {
   return perBuyUnit !== 1 ? `${base} · ${roundQty(quantity * perBuyUnit)} ${useIn}` : base;
 }
 
-// `quantity` -- what formatQuantity shows -- is already net of anything
-// reserved: a job's parts come off the shelf the moment it's scheduled, not
-// when it's actually done. Nothing about that changes here; this is purely
-// the "why is it lower than I expected" context, on its own line rather than
-// packed into the bold figure itself, which needs to stay short enough not
-// to wrap oddly on a narrow phone.
+// The bold figure is what's physically on the shelf. The stored `quantity`
+// is what's free -- a job's parts come off it the moment the job is
+// scheduled, which is what keeps the buy list and the low-stock flag honest --
+// so anything set aside is added back for the headline, and this line says
+// how it splits. On its own line rather than packed into the bold figure,
+// which needs to stay short enough not to wrap oddly on a narrow phone.
 function reservedLineHtml(part, reserved) {
   if (!reserved) return "";
-  const unit = part.unit || "each";
-  const roundedReserved = Math.round(reserved * 100) / 100;
-  const total = Math.round(((Number(part.quantity) || 0) + reserved) * 100) / 100;
-  return `<span class="row-meta">${escapeHtml(`${roundedReserved} ${unit} reserved for scheduled jobs · ${total} ${unit} total`)}</span>`;
+  const free = roundQty(Number(part.quantity) || 0);
+  const setAside = roundQty(reserved);
+  return `<span class="row-meta">${escapeHtml(
+    `${setAside} ${unitText(setAside, part.unit)} set aside for jobs · ${free} ${unitText(free, part.unit)} free`
+  )}</span>`;
 }
 
-function partRowHtml(part, vehicles = [], reservedByPartId = new Map()) {
+// Each part's stock-log entries, newest first.
+function stockLogByPart(entries) {
+  const byPart = new Map();
+  const sorted = [...entries].sort(
+    (a, b) =>
+      String(b.purchasedOn || "").localeCompare(String(a.purchasedOn || "")) ||
+      (b.createdAt?.toMillis?.() || 0) - (a.createdAt?.toMillis?.() || 0)
+  );
+  for (const entry of sorted) {
+    if (!entry.partId) continue;
+    if (!byPart.has(entry.partId)) byPart.set(entry.partId, []);
+    byPart.get(entry.partId).push(entry);
+  }
+  return byPart;
+}
+
+// The last couple of things that happened to a part, in a line: "Used on
+// Blue Odyssey, Oct 3 · Bought from NAPA, Sep 28". The full story is in its
+// history.
+function historyLineHtml(entries) {
+  if (!entries || !entries.length) return "";
+  const text = entries
+    .slice(0, 2)
+    .map((entry) => `${stockEntryLabel(entry)}, ${formatISO(entry.purchasedOn, { withYear: "auto" })}`)
+    .join(" · ");
+  return `<span class="row-meta history-line">${escapeHtml(text)}</span>`;
+}
+
+function partRowHtml(part, vehicles = [], reservedByPartId = new Map(), recent = []) {
   const low = isLowStock(part);
   const reserved = reservedByPartId.get(part.id) || 0;
   // Booking out more than the shelf held leaves a negative count. That's kept
   // rather than clamped -- it means the count was wrong, and hiding it would
   // lose the only evidence of that -- but it's shown as a discrepancy, not as
   // "running low".
-  const negative = (Number(part.quantity) || 0) < 0;
+  const negative = partKind(part) !== "tool" && (Number(part.quantity) || 0) < 0;
   const meta = [
     part.brand || null,
     part.partNumber ? `#${part.partNumber}` : null,
@@ -1416,11 +1458,12 @@ function partRowHtml(part, vehicles = [], reservedByPartId = new Map()) {
         ${meta ? `<span class="row-meta">${escapeHtml(meta)}</span>` : ""}
         ${fits.length ? `<span class="row-meta fits-line">Fits ${escapeHtml(fits.join(", "))}</span>` : ""}
         ${part.notes ? `<span class="row-note">${escapeHtml(part.notes)}</span>` : ""}
+        ${historyLineHtml(recent)}
       </div>
       <div class="row-side">
-        <span class="part-qty ${negative ? "negative" : low ? "low" : ""}">${escapeHtml(formatQuantity(part))}</span>
+        <span class="part-qty ${negative ? "negative" : low ? "low" : ""}">${escapeHtml(formatQuantity(part, (Number(part.quantity) || 0) + reserved))}</span>
         ${reservedLineHtml(part, reserved)}
-        ${negative ? `<span class="row-meta">more booked out than the shelf held — worth a recount</span>` : ""}
+        ${negative ? `<span class="row-meta">more set aside than the shelf holds — worth a recount</span>` : ""}
         <div class="row-actions">
           <button class="ghost use-btn" data-act="use-part" data-id="${part.id}" title="Log what you used">Use</button>
           <button class="ghost" data-act="log-purchase" data-id="${part.id}" title="Log a purchase">🧾</button>

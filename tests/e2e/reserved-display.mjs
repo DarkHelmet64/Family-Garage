@@ -1,7 +1,6 @@
-// The Parts & Supplies shelf shows what's reserved for scheduled jobs
-// alongside the free count -- not a change to what the bold figure itself
-// means (it's always been the free amount), just visible context for why
-// it's lower than the full total.
+// The Parts & Supplies shelf's bold figure is what's physically on the
+// shelf, with what's set aside for scheduled jobs and what's free on the
+// line under it.
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { launchApp, check, report } from "../helpers/serve.mjs";
@@ -26,14 +25,16 @@ await page.waitForSelector("[data-act=add-part]");
 await page.waitForTimeout(400);
 
 const oilRow = await page.locator('.part-row:has(.row-title-text:text-is("0W-20 oil"))').textContent();
-check("the free amount still shows as the bold headline figure, unchanged", /3 qt/.test(oilRow));
-check("shows what's reserved and the true total alongside it", /5 qt reserved for scheduled jobs/.test(oilRow) && /8 qt total/.test(oilRow));
+const oilFigure = await page.locator('.part-row:has(.row-title-text:text-is("0W-20 oil")) .part-qty').textContent();
+check("the bold figure is what's physically on the shelf", oilFigure.trim() === "8 qt");
+check("the line under it splits that into set aside and free", /5 qt set aside for jobs · 3 qt free/.test(oilRow));
+check("each row has a line of recent history", /Booked onto/.test(oilRow));
 
 const filterRow = await page.locator('.part-row:has(.row-title-text:text-is("Oil filter"))').textContent();
-check("a part reserved by only one job shows that job's amount, not the other part's", /1 each reserved/.test(filterRow) && /4 each total/.test(filterRow));
+check("a part reserved by only one job shows that job's amount, not the other part's", /1 each set aside for jobs · 3 each free/.test(filterRow));
 
 const coolantRow = await page.locator('.part-row:has(.row-title-text:text-is("Coolant"))').textContent();
-check("a part with nothing scheduled against it shows exactly as it always did -- no reserved line at all", !/reserved/.test(coolantRow));
+check("a part with nothing scheduled against it has no set-aside line at all", !/set aside/.test(coolantRow));
 
 report(app.errors);
 await app.close();

@@ -33,7 +33,7 @@ check("the shelf draws instead of hanging on Loading…", !/Loading/.test(listTe
 check("the malformed part itself is still listed", /Shop rags/.test(listText));
 check("the well-formed parts are all still listed", /0W-20 oil/.test(listText) && /Oil filter/.test(listText) && /Coolant/.test(listText));
 const coolantRow = await page.locator('.part-row:has(.row-title-text:text-is("Coolant"))').textContent();
-check("a valid entry beside a null one still counts as reserved", /1 gal reserved/.test(coolantRow));
+check("a valid entry beside a null one still counts as reserved", /1 gal set aside/.test(coolantRow));
 
 // The keep-above field had a placeholder-sounding label.
 await page.click("[data-act=add-part]");
