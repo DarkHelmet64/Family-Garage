@@ -1437,3 +1437,6 @@ input[type="file"] {
 .shelf-tools { margin-bottom: 12px; }
 .shelf-tools[hidden] { display: none; }
 .shelf-tools input[type="search"] { margin-bottom: 8px; }
+
+/* Undo on a hand-logged entry in a part's history. */
+.undo-btn { margin-top: 4px; }

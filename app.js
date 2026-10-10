@@ -1609,7 +1609,7 @@ function stockLogByPart(entries) {
   const sorted = [...entries].sort(
     (a, b) =>
       String(b.purchasedOn || "").localeCompare(String(a.purchasedOn || "")) ||
-      (b.createdAt?.toMillis?.() || 0) - (a.createdAt?.toMillis?.() || 0)
+      (b.loggedAt || b.createdAt?.toMillis?.() || 0) - (a.loggedAt || a.createdAt?.toMillis?.() || 0)
   );
   for (const entry of sorted) {
     if (!entry.partId) continue;
@@ -1740,6 +1740,10 @@ async function logStock(part, { kind, change, on, ...rest }) {
     purchasedOn: on || todayISO(),
     notes: null,
     ...rest,
+    // Orders entries logged on the same day. The server's own timestamp
+    // reads as empty until the write reaches it -- which, offline, can be a
+    // while -- so the device's clock is what puts a just-logged entry on top.
+    loggedAt: Date.now(),
     createdAt: serverTimestamp(),
   });
 }
@@ -1965,6 +1969,7 @@ function stockEntryLabel(entry) {
     case "start":
       return "Starting count";
     case "job":
+      if (entry.done && entry.change <= 0) return `Used on ${entry.serviceTitle || "a job"}`;
       return entry.change < 0 ? `Booked onto ${entry.serviceTitle || "a job"}` : `Back from ${entry.serviceTitle || "a job"}`;
     default:
       return entry.vendor ? `Bought from ${entry.vendor}` : "Bought";
@@ -1973,6 +1978,9 @@ function stockEntryLabel(entry) {
 
 function stockChangeText(entry) {
   if (entry.kind === "used" && entry.amount == null && !entry.change) return "";
+  // A finished job says what it used; whether that moved the shelf just now
+  // or back when it was booked isn't the point.
+  if (entry.kind === "job" && entry.done && entry.change <= 0) return `${roundQty(entry.quantity)} ${entry.unit || "each"} used`;
   if (entry.kind === "used" && entry.amount != null) return `−${roundQty(entry.amount)} ${entry.amountUnit || entry.unit || "each"}`;
   const change = entry.change != null ? Number(entry.change) : Number(entry.quantity) || 0;
   return `${change < 0 ? "−" : "+"}${roundQty(Math.abs(change))} ${entry.unit || "each"}`;
@@ -2058,13 +2066,18 @@ async function openPartHistory(part, state) {
       </div>`;
   };
 
+  // A Use, recount or starting count logged by mistake can be undone here:
+  // the entry goes, and the count moves back by what it moved.
   const adjustedRowHtml = (entry) => `
       <div class="row">
         <div class="row-main">
           <span class="row-title-text">${escapeHtml(stockEntryLabel(entry))}</span>
           <span class="row-meta">${escapeHtml([formatISO(entry.purchasedOn), entry.notes].filter(Boolean).join(" · "))}</span>
         </div>
-        <div class="row-side"><span class="part-qty">${escapeHtml(stockChangeText(entry))}</span></div>
+        <div class="row-side">
+          <span class="part-qty">${escapeHtml(stockChangeText(entry))}</span>
+          <button class="ghost small undo-btn" data-undo="${escapeHtml(entry.id)}">Undo</button>
+        </div>
       </div>`;
 
   const usedRowHtml = ({ service, used }) => {
@@ -2099,6 +2112,49 @@ async function openPartHistory(part, state) {
     </div>
   `);
   overlay.querySelector("#history-close").addEventListener("click", () => overlay.remove());
+  overlay.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-undo]");
+    const entry = button && adjusted.find((candidate) => candidate.id === button.dataset.undo);
+    if (!entry) return;
+    Promise.resolve(confirmUndoStockEntry(entry))
+      .then((undone) => undone && overlay.remove())
+      .catch(reportActionFailure);
+  });
+}
+
+async function confirmUndoStockEntry(entry) {
+  const change = stockEntryChange(entry);
+  const confirmed = await openConfirmModal({
+    title: "Undo this?",
+    message: `“${stockEntryLabel(entry)}” comes off ${entry.partName || "the part"}'s log${
+      change ? `, and its count goes ${change < 0 ? "back up" : "back down"} by ${roundQty(Math.abs(change))} ${entry.unit || "each"}` : ""
+    }.`,
+    confirmLabel: "Undo",
+    danger: true,
+  });
+  if (!confirmed) return false;
+  await undoStockEntry(entry);
+  showToast("Undone");
+  return true;
+}
+
+// What an entry did to the shelf. One from before `change` existed is a
+// purchase, which added its whole quantity.
+const stockEntryChange = (entry) =>
+  entry.change != null ? Number(entry.change) || 0 : isPurchase(entry) ? Number(entry.quantity) || 0 : 0;
+
+// Takes an entry back off the log and its effect back off the shelf -- the
+// shelf first, for the same reason moveStock moves it first.
+async function undoStockEntry(entry) {
+  const change = stockEntryChange(entry);
+  try {
+    if (change) await updateDoc(doc(db, "parts", entry.partId), { quantity: increment(-change), updatedAt: serverTimestamp() });
+  } catch (err) {
+    // The part itself may have been removed since -- the entry still goes,
+    // there's just no shelf left to put it back onto.
+    console.warn("Couldn't reverse the shelf for an undone entry", err);
+  }
+  await deleteDoc(doc(db, "purchases", entry.id));
 }
 
 // Shows the part sheet's fields for the kind picked, worded for it: a counted
@@ -2508,18 +2564,9 @@ async function confirmDeletePurchase(purchase) {
   showToast("Purchase deleted");
 }
 
-async function deletePurchase(purchase) {
-  // What the purchase actually added -- nothing, for a tool. An entry from
-  // before `change` existed added its whole quantity.
-  const added = purchase.change != null ? Number(purchase.change) : Number(purchase.quantity) || 0;
-  try {
-    if (added) await updateDoc(doc(db, "parts", purchase.partId), { quantity: increment(-added), updatedAt: serverTimestamp() });
-  } catch (err) {
-    // The part itself may have been removed from the shelf since -- the log
-    // entry still goes, there's just no shelf left to put it back onto.
-    console.warn("Couldn't reverse the shelf for a deleted purchase", err);
-  }
-  await deleteDoc(doc(db, "purchases", purchase.id));
+// What the purchase actually added comes back off -- nothing, for a tool.
+function deletePurchase(purchase) {
+  return undoStockEntry(purchase);
 }
 
 // ---------------------------------------------------------------------------
@@ -3807,7 +3854,10 @@ async function openCompletedServiceForm(state, existing, odometerMiles, { comple
   const partsBefore = combining
     ? [...(existing?.parts || []), ...combining.flatMap((record) => record.parts || [])]
     : currentlyReserved(existing);
-  await applyPartUsage(partsBefore, partsUsed, { vehicleId: state.id, title: payload.title, on: values.servicedOn });
+  // The shelf moves here without logging each step: what the log should say
+  // about a finished visit is what it used, which is written once below,
+  // after any folded-in jobs have handed back what they had set aside.
+  await applyPartUsage(partsBefore, partsUsed, { quiet: true });
 
   const services = collection(db, "vehicles", state.id, "services");
   let serviceId;
@@ -3835,14 +3885,24 @@ async function openCompletedServiceForm(state, existing, odometerMiles, { comple
   // two jobs are the same one -- so a line renamed on the sheet leaves its
   // record behind rather than guessing, which is the harmless way to be wrong.
   const foldedAway = folding ? folding.filter((record) => saidDone(record, items)) : [];
+  const handedBack = [];
   for (const record of foldedAway) {
     // Each one had already reserved its own parts when it was booked --
     // releasing that here, per record, is what the combined deduction above
     // is actually being weighed against.
-    await applyPartUsage(currentlyReserved(record), [], { vehicleId: state.id, title: record.title });
+    handedBack.push(...currentlyReserved(record));
+    await applyPartUsage(currentlyReserved(record), [], { quiet: true });
     await deleteServicePhotos(state.id, record.id);
     await deleteDoc(doc(db, "vehicles", state.id, "services", record.id));
   }
+  await logVisitParts([...partsBefore, ...handedBack], partsUsed, {
+    vehicleId: state.id,
+    title: payload.title,
+    on: values.servicedOn,
+    // A job going from booked to done says it used its parts even though the
+    // shelf doesn't move -- they came off when it was booked.
+    finishing: existing?.status === "scheduled" || foldedAway.length > 0,
+  }).catch((err) => console.warn("Couldn't log the visit's parts", err));
 
   // A combined-away record is absorbed whole, not judged item by item -- its
   // parts and photos already moved onto this record above, so removing it here
@@ -4345,6 +4405,8 @@ async function bookPlanEntry(state, id) {
 // the shelf moved for gets an entry naming the job, so a part's history shows
 // where it went without anyone having to log it twice.
 async function applyPartUsage(before, after, job = {}) {
+  // `quiet` moves the shelf without logging, for a caller that logs the
+  // whole change itself (see logVisitParts).
   const deltas = new Map();
   const names = new Map();
   // The job each part went on, where the rows say: the newer rows first, so
@@ -4370,6 +4432,7 @@ async function applyPartUsage(before, after, job = {}) {
       console.warn("Couldn't adjust the shelf for a part", partId, err);
       continue;
     }
+    if (job.quiet) continue;
     // The log is a nicety on top of the shelf move, never a reason for the
     // job's own save to fail.
     await logStock(
@@ -4383,6 +4446,44 @@ async function applyPartUsage(before, after, job = {}) {
         unit: [...before, ...after].find((used) => used.partId === partId)?.unit || "each",
       }
     ).catch((err) => console.warn("Couldn't log a job's parts", partId, err));
+  }
+}
+
+// One log entry per part for a finished visit: what it used, on which job,
+// and how far that moved the shelf -- often not at all, since a booked job's
+// parts came off when it was booked. Logged when the shelf moved, or when the
+// visit is the moment a booked job became done; re-saving a finished visit
+// unchanged logs nothing.
+async function logVisitParts(before, after, { vehicleId, title, on, finishing }) {
+  const byPart = new Map();
+  const tally = (list, key) => {
+    for (const used of list || []) {
+      if (!used || !used.partId) continue;
+      const entry = byPart.get(used.partId) || { before: 0, after: 0, name: used.name, unit: used.unit, jobs: [] };
+      entry[key] += Number(used.quantity) || 0;
+      if (key === "after" && used.forJob && !entry.jobs.includes(used.forJob)) entry.jobs.push(used.forJob);
+      byPart.set(used.partId, entry);
+    }
+  };
+  tally(before, "before");
+  tally(after, "after");
+
+  for (const [partId, part] of byPart) {
+    const change = roundQty(part.before - part.after);
+    if (!change && !(finishing && part.after)) continue;
+    await logStock(
+      { id: partId, name: part.name },
+      {
+        kind: "job",
+        done: true,
+        change,
+        quantity: roundQty(part.after || Math.abs(change)),
+        unit: part.unit || "each",
+        on,
+        vehicleId,
+        serviceTitle: part.jobs.join(", ") || title || null,
+      }
+    );
   }
 }
 

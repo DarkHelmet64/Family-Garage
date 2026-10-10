@@ -649,7 +649,16 @@ a count that's drifted can be traced instead of just overwritten:
   shelf** box to type over; the count only moves through Use, purchases,
   recounts and jobs.
 - Booking parts onto a job, changing how many, or deleting the job logs an
-  entry naming the job and vehicle.
+  entry naming the job and vehicle. Finishing it logs **Used on** that job
+  with the amount used — once, and without moving the count again, since the
+  parts came off when it was booked.
+- A Use, recount or starting count logged by mistake can be undone from the
+  part's history (**Undo** on its row): the entry goes, and the count moves
+  back by what it moved.
+
+The parts picker on a service sheet shows what's **free** — anything already
+set aside for other jobs is off that figure, so it can read lower than the
+shelf page's bold number.
 
 The log lives alongside purchases in Firestore, so the rules you've already
 published cover it; nothing to republish.
