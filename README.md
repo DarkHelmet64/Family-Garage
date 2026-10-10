@@ -958,10 +958,19 @@ files; there's nothing to manage.
 ## Installing it like an app
 
 The site has a manifest and icon, so a phone's browser offers **Add to Home
-Screen** (Android: the browser menu; iPhone: the Share sheet). Installed, it
-opens in its own window with no address bar, the same as any other app —
-handy standing at the car, one tap from the home screen rather than a
-bookmark to dig for.
+Screen**. Installed, it opens in its own window with no address bar, the same
+as any other app — handy standing at the car, one tap from the home screen
+rather than a bookmark to dig for.
+
+**On an iPhone or iPad:** open the site in **Safari** (not Chrome — on iOS only
+Safari can add a web app with its own icon), tap the **Share** button (the
+square with an arrow), scroll down and tap **Add to Home Screen**, then
+**Add**. It appears as **Garage** with the car icon. iOS saves the icon when
+you add it, so if you added it before the icon changed, delete it from the
+home screen and add it again to pick up the new one.
+
+**On Android:** open the site in Chrome, tap the **⋮** menu, then **Add to Home
+screen** (or **Install app**).
 
 ## Backing up your data
 

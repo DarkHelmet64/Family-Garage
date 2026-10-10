@@ -9,8 +9,11 @@
   <meta name="theme-color" content="#2f6fed" />
   <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🚗</text></svg>" />
   <link rel="manifest" href="manifest.json" />
-  <!-- iOS ignores the manifest for "Add to Home Screen"; these are its own equivalent. -->
-  <link rel="apple-touch-icon" href="icons/icon-192.png" />
+  <!-- iOS ignores the manifest for "Add to Home Screen"; these are its own equivalent.
+       180x180 is the size an iPhone's home screen uses, and the image is a
+       full square: iOS rounds the corners itself, so corners drawn into the
+       picture would show as white slivers. -->
+  <link rel="apple-touch-icon" sizes="180x180" href="icons/apple-touch-icon.png" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-title" content="Garage" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />

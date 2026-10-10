@@ -29,6 +29,17 @@ for (const icon of manifest.icons) {
   check(`icon ${icon.src} is actually fetchable`, res.ok());
 }
 
+// iOS ignores the manifest for Add to Home Screen and uses apple-touch-icon:
+// it wants 180x180, a full square (it rounds the corners itself).
+const touchIcon = await page.getAttribute('link[rel="apple-touch-icon"]', "href");
+const touchRes = touchIcon ? await page.request.get(`${base}${touchIcon}`) : null;
+const touchBytes = touchRes && touchRes.ok() ? await touchRes.body() : null;
+check("there's an iPhone home-screen icon, and it's fetchable", !!touchBytes);
+check(
+  "…at the 180x180 an iPhone uses",
+  !!touchBytes && touchBytes.readUInt32BE(16) === 180 && touchBytes.readUInt32BE(20) === 180
+);
+
 // The service worker should reach "activated", not just "installing" --
 // register() resolving only means the browser accepted it, not that it's
 // actually running yet.

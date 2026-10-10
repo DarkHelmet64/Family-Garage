@@ -24,6 +24,7 @@ const SHELL_FILES = [
   "firebase-config.js",
   "manifest.json",
   "icons/icon.svg",
+  "icons/apple-touch-icon.png",
   "icons/icon-192.png",
   "icons/icon-512.png",
 ];
