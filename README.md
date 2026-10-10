@@ -542,8 +542,9 @@ household — a case of oil gets used on whichever car needs it, so parts aren't
 owned by a vehicle. Each item has a name, and optionally a **brand**, a
 **category**, a **part number**, a **model**, a **size**, who you **bought it
 from**, what it costs each, and the level to keep it above.
-Anything at or below that level is flagged as running low, and the row has **+**
-and **−** for a quick recount. Brands, categories and vendors you've already
+Anything at or below that level is flagged as running low. Each row has
+**Use** and 🧾 (**Log a purchase**), and every change to the count is logged —
+see [The stock log](#the-stock-log). Brands, categories and vendors you've already
 typed are offered back as you type, so "Fram" doesn't become "fram" on the next
 row.
 
@@ -580,26 +581,46 @@ sheet behaves exactly as it always has.
 
 The 🧾 button on any shelf row is **Log a purchase** — how many, what it cost
 in total, who it was bought from, and the date, defaulting to today. Saving
-adds that quantity onto the shelf, the same as typing it into **On the
-shelf** would, and keeps a dated entry of the purchase itself: what the part
-was called and counted in at the time, so a later rename or removal doesn't
-change what the log says was bought. **+ Add a part** does the same
-automatically for a brand-new item's starting count, so the first batch
-shows up in the log without a second step.
+adds that quantity onto the shelf and keeps a dated entry of the purchase
+itself: what the part was called and counted in at the time, so a later
+rename or removal doesn't change what the log says was bought. A brand-new
+item's starting count is logged as a **starting count**, not a purchase —
+what was already on hand may have been bought years ago, and the purchase log
+is what's been spent.
 
 **🧾 Purchases**, next to **+ Add a part**, lists every logged purchase,
 newest first, with a running total of what's been spent. Tap one to delete
-it — the quantity comes back off the shelf, same as it went on. The **+**/**−**
-buttons and editing a part's own **On the shelf** figure are still there for a
-quick recount and don't touch the log; only **Log a purchase** does.
+it — the quantity comes back off the shelf, same as it went on. Only
+purchases are listed here; using, recounting and jobs are in each part's own
+history.
+
+### The stock log
+
+Every change to a part's count is logged with its date and what moved it, so
+a count that's drifted can be traced instead of just overwritten:
+
+- **Use**, on the shelf row, is for anything taken straight off the shelf
+  without a service record — topping up washer fluid, a few rags. It asks how
+  much (in the unit the part is used in), optionally which vehicle, and a note.
+- **Recount what's on the shelf**, in a part's edit sheet, asks what's
+  physically there right now (including anything set aside for scheduled
+  jobs) and logs the difference. Editing a part no longer has an **On the
+  shelf** box to type over; the count only moves through Use, purchases,
+  recounts and jobs.
+- Booking parts onto a job, changing how many, or deleting the job logs an
+  entry naming the job and vehicle.
+
+The log lives alongside purchases in Firestore, so the rules you've already
+published cover it; nothing to republish.
 
 ### A part's history
 
 Tapping a part row still opens it for editing, exactly as it always has.
 Inside that sheet, **View purchase & usage history** opens a read-only
 rundown of everywhere it's been: every [logged purchase](#purchases) of it,
-newest first, and every service across the whole garage that's used or
-reserved it — done or still scheduled, each naming its own job and vehicle.
+newest first, every Use and recount, and every service across the whole
+garage that's used or reserved it — done or still scheduled, each naming its
+own job and vehicle.
 Nothing in it is editable, and closing it leaves the edit sheet underneath
 exactly as you left it, mid-edit or not.
 
@@ -635,8 +656,8 @@ number worked out a moment earlier, so two phones logging service at once can't
 undo each other's arithmetic.
 
 Booking out more than you had leaves a negative count. That's kept rather than
-quietly clamped — it means the count was wrong, and the row says so — and a
-recount puts it right.
+quietly clamped — it means the count was wrong, and the row says so — and
+**Recount** puts it right, with the correction logged.
 
 ### Buying in one unit, using in another
 
