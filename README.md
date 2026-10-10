@@ -270,8 +270,10 @@ Tap **🔧 Add service** at the top of the page for either:
   by — leave both blank for a job you just want on the list, with nothing
   to remind you of yet), and optionally a shop and a note. Several jobs due at the same visit save
   as separate records, one per name, so each shows and gets marked done on
-  its own. Parts entered here land on the first job listed — add parts to
-  any of the others afterward by editing it on its own. Nothing about it has
+  its own. With more than one job listed, each part row asks which job it's
+  for, and goes on that job's record (one left unpicked goes on the first).
+  Logging those jobs later as one visit keeps each part on its own job, and a
+  part's history names the job it went on. Nothing about it has
   to come from the [service schedule](#the-service-schedule) — the schedule
   is for jobs that come round on an interval; this is for the one-off — the
   belt that started squealing, the recall letter, the thing you noticed on
