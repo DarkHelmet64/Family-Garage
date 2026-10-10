@@ -16,11 +16,14 @@ import {
   serverTimestamp,
   writeBatch,
   increment,
+  query,
+  where,
 } from "https://www.gstatic.com/firebasejs/12.19.0/firebase-firestore.js";
 import { firebaseConfig } from "./firebase-config.js";
 
 import {
   isoToDate,
+  isoFromDate,
   formatUSD,
   formatPricePerGallon,
   dollarsToCents,
@@ -1234,15 +1237,29 @@ function renderPartsView() {
       </div>
     </div>
     <p class="hint" id="parts-intro"></p>
+    <div class="shelf-tools" id="shelf-tools" hidden>
+      <input type="search" id="parts-search" placeholder="Search the shelf" autocomplete="off" />
+      <div class="check-row vendor-filter" id="parts-categories"></div>
+    </div>
     <div id="parts-list"><p class="loading">Loading…</p></div>
   `;
 
   // `log` is each part's stock-log entries, newest first, for the line of
-  // recent history under it.
-  const state = { parts: [], vehicles: [], reserved: new Map(), log: new Map() };
+  // recent history under it. `search` and `category` narrow what's shown.
+  const state = { parts: [], vehicles: [], reserved: new Map(), log: new Map(), search: "", category: null };
+  document.getElementById("parts-search").addEventListener("input", (event) => {
+    state.search = event.target.value;
+    draw();
+  });
   $app.addEventListener("click", (event) => {
     const target = event.target.closest("[data-act]");
     if (!target) return;
+    if (target.dataset.act === "filter-category") {
+      const category = target.dataset.id || null;
+      state.category = state.category === category ? null : category;
+      draw();
+      return;
+    }
     Promise.resolve(handlePartsAction(target.dataset.act, target.dataset.id, state)).catch(reportActionFailure);
   });
 
@@ -1271,18 +1288,15 @@ function renderPartsView() {
     },
     (err) => console.warn("Couldn't read the vehicle list", err)
   );
-  // Same reasoning as everywhere else this session's read-cost work touched:
-  // one collection-group query covers every vehicle's scheduled jobs, so
-  // showing how much of each part they've spoken for doesn't cost a read per
-  // vehicle. Only needed for that breakdown -- the shelf itself, same as the
-  // vehicle list above, renders fine without waiting on it.
-  onSnapshot(
-    collectionGroup(db, "services"),
-    (snap) => {
-      // A bad record here only costs the "reserved" breakdown, never the
+  // What's set aside for scheduled jobs, across every vehicle in one
+  // collection-group query. Only needed for that breakdown -- the shelf
+  // itself, same as the vehicle list above, renders fine without it.
+  watchScheduledServices(
+    (services) => {
+      // A bad record here only costs the "set aside" breakdown, never the
       // shelf itself.
       try {
-        state.reserved = reservedByPart(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+        state.reserved = reservedByPart(services);
       } catch (err) {
         console.warn("Couldn't work out what's reserved across the garage", err);
         state.reserved = new Map();
@@ -1292,9 +1306,10 @@ function renderPartsView() {
     (err) => console.warn("Couldn't read what's reserved across the garage", err)
   );
   // Only for each row's line of recent history -- like the two above, the
-  // shelf draws without it.
+  // shelf draws without it -- so only the recent stretch of the log is read,
+  // not every entry ever made.
   onSnapshot(
-    collection(db, "purchases"),
+    recentStockLog(),
     (snap) => {
       state.log = stockLogByPart(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
       if (state.parts.length) draw();
@@ -1325,6 +1340,38 @@ function renderPartsView() {
   );
 }
 
+// Every scheduled job in the garage, live. Only scheduled ones are read --
+// a done job never sets anything aside, and they're most of the history --
+// which takes a collection-group index on `status` that a Firebase project
+// doesn't have until someone adds it (see the README). Until then Firestore
+// refuses the filtered query, and this falls back to reading every service,
+// which is what it always did: slower as the history grows, but right.
+function watchScheduledServices(onServices, onError) {
+  const toServices = (snap) => snap.docs.map((d) => ({ id: d.id, ...d.data() })).filter((s) => s.status !== "done");
+  onSnapshot(
+    query(collectionGroup(db, "services"), where("status", "==", "scheduled")),
+    (snap) => onServices(toServices(snap)),
+    (err) => {
+      if (err?.code !== "failed-precondition") return onError(err);
+      console.info("No collection-group index on services.status yet -- reading every service instead.", err.message);
+      onSnapshot(collectionGroup(db, "services"), (snap) => onServices(toServices(snap)), onError);
+    }
+  );
+}
+
+// How far back the shelf's history lines and the Purchases page look before
+// being asked for more: enough for what's recent, without reading every
+// entry the log has ever had on each visit.
+const RECENT_LOG_DAYS = 90;
+const recentStockLog = () =>
+  query(collection(db, "purchases"), where("purchasedOn", ">=", addDaysISO(todayISO(), -RECENT_LOG_DAYS)));
+
+function addDaysISO(iso, days) {
+  const date = isoToDate(iso);
+  date.setDate(date.getDate() + days);
+  return isoFromDate(date);
+}
+
 // What's already been typed into a field across the shelf, most common first,
 // so "Fram" doesn't become "fram" and "FRAM" on three different rows.
 function usedValues(parts, key) {
@@ -1343,14 +1390,21 @@ function usedValues(parts, key) {
 // there's more than one to group into. A shelf where nothing has been
 // categorised reads exactly as it always did, one flat list.
 function drawParts(listEl, state) {
+  drawShelfTools(state);
   if (!state.parts.length) {
     listEl.innerHTML = `<p class="empty small">Nothing on the shelf yet. Add the oil, filters and blades you keep
       around, and they can be booked against a service — which takes them back off the shelf.</p>`;
     return;
   }
 
+  const parts = visibleParts(state);
+  if (!parts.length) {
+    listEl.innerHTML = `<p class="empty small">Nothing on the shelf matches.</p>`;
+    return;
+  }
+
   const groups = new Map();
-  for (const part of state.parts) {
+  for (const part of parts) {
     const key = String(part.category || "").trim() || "";
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(part);
@@ -1359,7 +1413,7 @@ function drawParts(listEl, state) {
   const list = (parts) =>
     `<div class="list">${parts.map((part) => partRowHtml(part, state.vehicles, state.reserved, state.log.get(part.id))).join("")}</div>`;
   if (groups.size === 1 && groups.has("")) {
-    listEl.innerHTML = list(state.parts);
+    listEl.innerHTML = list(parts);
     return;
   }
 
@@ -1369,6 +1423,42 @@ function drawParts(listEl, state) {
   listEl.innerHTML =
     named.map((key) => `<div class="section-title">${escapeHtml(key)}</div>${list(groups.get(key))}`).join("") +
     (groups.has("") ? `<div class="section-title">Uncategorised</div>${list(groups.get(""))}` : "");
+}
+
+// The parts matching the search box and the picked category. The search
+// looks at everything a row shows about a part, so "PH7317", "fram" and
+// "filter" all find the same oil filter.
+function visibleParts(state) {
+  const words = state.search.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  return state.parts.filter((part) => {
+    if (state.category && String(part.category || "").trim() !== state.category) return false;
+    if (!words.length) return true;
+    const text = [part.name, part.brand, part.category, part.partNumber, part.modelNumber, part.size, part.vendor, part.notes]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase();
+    return words.every((word) => text.includes(word));
+  });
+}
+
+// The search box once there's a shelf to search, and a chip per category
+// once there's more than one to pick between.
+function drawShelfTools(state) {
+  document.getElementById("shelf-tools").hidden = !state.parts.length;
+  const categories = [...new Set(state.parts.map((part) => String(part.category || "").trim()).filter(Boolean))].sort((a, b) =>
+    a.localeCompare(b)
+  );
+  if (state.category && !categories.includes(state.category)) state.category = null;
+  document.getElementById("parts-categories").innerHTML =
+    categories.length > 1
+      ? `<button class="secondary small vendor-chip${state.category ? "" : " active"}" data-act="filter-category" data-id="">All</button>` +
+        categories
+          .map(
+            (category) =>
+              `<button class="secondary small vendor-chip${state.category === category ? " active" : ""}" data-act="filter-category" data-id="${escapeHtml(category)}">${escapeHtml(category)}</button>`
+          )
+          .join("")
+      : "";
 }
 
 // `quantity` defaults to the part's own count. A measured item with a size
@@ -1798,7 +1888,7 @@ function fillPartTemplate(overlay, part) {
 // list in memory before it's actually asked for.
 async function openPartHistory(part, state) {
   const [purchasesSnap, servicesSnap] = await Promise.all([
-    getDocs(collection(db, "purchases")),
+    getDocs(query(collection(db, "purchases"), where("partId", "==", part.id))),
     getDocs(collectionGroup(db, "services")),
   ]);
 
@@ -2196,39 +2286,55 @@ function renderPurchasesView() {
     <div id="purchases-list"><p class="loading">Loading…</p></div>
   `;
 
-  const state = { purchases: [] };
+  // The last RECENT_LOG_DAYS to start with, rather than every purchase ever
+  // logged on every visit; "Show older" swaps in the whole log.
+  const state = { purchases: [], all: false };
+  const listEl = document.getElementById("purchases-list");
+  let unsubscribe = () => {};
+  const watch = () => {
+    unsubscribe();
+    unsubscribe = onSnapshot(
+      state.all ? collection(db, "purchases") : recentStockLog(),
+      (snap) => {
+        state.purchases = snap.docs.map((d) => ({ id: d.id, ...d.data() })).filter(isPurchase);
+        state.purchases.sort((a, b) => String(b.purchasedOn || "").localeCompare(String(a.purchasedOn || "")));
+        drawPurchases(listEl, state);
+      },
+      (err) => {
+        listEl.innerHTML = `<p class="empty">Couldn't load the purchase log.<br /><span class="hint">${escapeHtml(err.message)}</span></p>`;
+      }
+    );
+  };
+
   $app.addEventListener("click", (event) => {
     const target = event.target.closest("[data-act]");
     if (!target) return;
+    if (target.dataset.act === "show-older-purchases") {
+      state.all = true;
+      watch();
+      return;
+    }
     Promise.resolve(handlePurchasesAction(target.dataset.act, target.dataset.id, state)).catch(reportActionFailure);
   });
-
-  const listEl = document.getElementById("purchases-list");
-  onSnapshot(
-    collection(db, "purchases"),
-    (snap) => {
-      state.purchases = snap.docs.map((d) => ({ id: d.id, ...d.data() })).filter(isPurchase);
-      state.purchases.sort((a, b) => String(b.purchasedOn || "").localeCompare(String(a.purchasedOn || "")));
-      drawPurchases(listEl, state);
-    },
-    (err) => {
-      listEl.innerHTML = `<p class="empty">Couldn't load the purchase log.<br /><span class="hint">${escapeHtml(err.message)}</span></p>`;
-    }
-  );
+  watch();
 }
 
 function drawPurchases(listEl, state) {
   const introEl = document.getElementById("purchases-intro");
+  const span = state.all ? "" : ` in the last ${RECENT_LOG_DAYS} days`;
+  const older = state.all
+    ? ""
+    : `<button class="secondary small show-older" data-act="show-older-purchases">Show older purchases</button>`;
   if (!state.purchases.length) {
     introEl.textContent = "";
-    listEl.innerHTML = `<p class="empty small">Nothing logged yet.</p>`;
+    listEl.innerHTML = `<p class="empty small">Nothing logged${span}.</p>${older}`;
     return;
   }
   const totalCents = state.purchases.reduce((sum, purchase) => sum + (purchase.totalCents || 0), 0);
-  introEl.textContent = `${state.purchases.length} purchase${state.purchases.length === 1 ? "" : "s"}${
+  introEl.textContent = `${state.purchases.length} purchase${state.purchases.length === 1 ? "" : "s"}${span}${
     totalCents ? ` · ${formatUSD(totalCents)} total` : ""
   }`;
-  listEl.innerHTML = `<div class="list">${state.purchases.map(purchaseRowHtml).join("")}</div>`;
+  listEl.innerHTML = `<div class="list">${state.purchases.map(purchaseRowHtml).join("")}</div>${older}`;
 }
 
 function purchaseRowHtml(purchase) {

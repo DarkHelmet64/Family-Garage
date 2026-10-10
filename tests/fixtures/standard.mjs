@@ -122,7 +122,7 @@ const DATA = {
 
 const listeners = [];
 const rows = (path) => (store[path] = Array.isArray(store[path]) ? store[path] : []);
-const snapFor = (path) => {
+const rawSnapFor = (path) => {
   const docs = rows(path).map((r) => ({ id: r.id, data: () => ({ ...r }), ref: { path, id: r.id } }));
   return { empty: !docs.length, docs, forEach: (fn) => docs.forEach(fn) };
 };
@@ -133,16 +133,39 @@ const docSnapFor = (path, id) => {
 // A collection-group query matches every stored path whose last segment is
 // that name, at any depth -- "vehicles/v1/services", "vehicles/v2/services",
 // and so on, all in one pass, the same as Firestore's own collectionGroup().
-const groupSnapFor = (name) => {
+const rawGroupSnapFor = (name) => {
   const matchingPaths = Object.keys(store).filter((p) => Array.isArray(store[p]) && p.split("/").pop() === name);
   const docs = matchingPaths.flatMap((p) => rows(p).map((r) => ({ id: r.id, data: () => ({ ...r }), ref: { path: p, id: r.id } })));
   return { empty: !docs.length, docs, forEach: (fn) => docs.forEach(fn) };
 };
+
+// Just enough of query() for the app's own filters: where (==, >=, <=, >, <),
+// orderBy and limit, applied to the same in-memory rows. A doc missing the
+// field never matches a where, the same as Firestore.
+const COMPARE = { "==": (a, b) => a === b, ">=": (a, b) => a >= b, "<=": (a, b) => a <= b, ">": (a, b) => a > b, "<": (a, b) => a < b };
+const constrain = (snap, constraints) => {
+  if (!constraints || !constraints.length) return snap;
+  let docs = snap.docs.filter((d) =>
+    constraints.every((c) => c.type !== "where" || (d.data()[c.field] !== undefined && COMPARE[c.op](d.data()[c.field], c.value)))
+  );
+  for (const c of constraints.filter((c) => c.type === "orderBy")) {
+    docs = [...docs].sort((a, b) => {
+      const x = a.data()[c.field];
+      const y = b.data()[c.field];
+      return (x < y ? -1 : x > y ? 1 : 0) * (c.dir === "desc" ? -1 : 1);
+    });
+  }
+  const cap = constraints.find((c) => c.type === "limit");
+  if (cap) docs = docs.slice(0, cap.n);
+  return { empty: !docs.length, docs, forEach: (fn) => docs.forEach(fn) };
+};
+const snapFor = (path, constraints) => constrain(rawSnapFor(path), constraints);
+const groupSnapFor = (name, constraints) => constrain(rawGroupSnapFor(name), constraints);
 const notify = () =>
   listeners.forEach((l) => {
     if (l.type === "doc") l.cb(docSnapFor(l.path, l.id));
-    else if (l.type === "collectionGroup") l.cb(groupSnapFor(l.name));
-    else l.cb(snapFor(l.path));
+    else if (l.type === "collectionGroup") l.cb(groupSnapFor(l.name, l.constraints));
+    else l.cb(snapFor(l.path, l.constraints));
   });
 
 // A handful of actions in the app navigate by setting location.search, which
@@ -164,8 +187,12 @@ const persist = () => {
 persist();
 
 const reads = { getDocs: {}, getDoc: {}, onSnapshot: {}, updateDoc: {} };
-const count = (kind, path) => {
-  reads[kind][path] = (reads[kind][path] || 0) + 1;
+// A filtered read is counted under its filters too -- "purchases?purchasedOn>=…"
+// -- so a test can tell a narrow read from a whole-collection one.
+const count = (kind, path, constraints) => {
+  const where = (constraints || []).filter((c) => c.type === "where").map((c) => `${c.field}${c.op}${c.value}`);
+  const key = where.length ? `${path}?${where.join("&")}` : path;
+  reads[kind][key] = (reads[kind][key] || 0) + 1;
 };
 let writeLog = [];
 const logWrite = (kind, path, id, patch) => writeLog.push({ kind, path, id, keys: patch ? Object.keys(patch) : [] });
@@ -187,32 +214,43 @@ export const persistentMultipleTabManager = () => ({});
 export const collection = (_db, ...s) => ({ kind: "collection", path: s.join("/") });
 export const collectionGroup = (_db, name) => ({ kind: "collectionGroup", name });
 export const doc = (_db, ...s) => ({ kind: "doc", path: s.slice(0, -1).join("/"), id: s[s.length - 1] });
+export const query = (ref, ...constraints) => ({ ...ref, constraints: [...(ref.constraints || []), ...constraints] });
+export const where = (field, op, value) => ({ type: "where", field, op, value });
+export const orderBy = (field, dir = "asc") => ({ type: "orderBy", field, dir });
+export const limit = (n) => ({ type: "limit", n });
 export const getDocs = async (ref) => {
   if (ref.kind === "collectionGroup") {
-    count("getDocs", `collectionGroup:${ref.name}`);
-    return groupSnapFor(ref.name);
+    count("getDocs", `collectionGroup:${ref.name}`, ref.constraints);
+    return groupSnapFor(ref.name, ref.constraints);
   }
-  count("getDocs", ref.path);
-  return snapFor(ref.path);
+  count("getDocs", ref.path, ref.constraints);
+  return snapFor(ref.path, ref.constraints);
 };
 export const getDoc = async (ref) => {
   count("getDoc", ref.path);
   return docSnapFor(ref.path, ref.id);
 };
-export const onSnapshot = (ref, onNext) => {
-  if (ref.kind === "collectionGroup") {
-    count("onSnapshot", `collectionGroup:${ref.name}`);
-    listeners.push({ type: "collectionGroup", name: ref.name, cb: onNext });
-    setTimeout(() => onNext(groupSnapFor(ref.name)), 0);
+export const onSnapshot = (ref, onNext, onError) => {
+  // A real project has to be told to index a field for collection-group
+  // queries; a test can set this to see what happens before it has been.
+  if (ref.kind === "collectionGroup" && ref.constraints?.some((c) => c.type === "where") && typeof window !== "undefined" && window.__noGroupIndex) {
+    count("onSnapshot", `collectionGroup:${ref.name}:refused`);
+    setTimeout(() => onError?.({ code: "failed-precondition", message: "The query requires an index." }), 0);
     return () => {};
   }
-  count("onSnapshot", ref.path);
+  if (ref.kind === "collectionGroup") {
+    count("onSnapshot", `collectionGroup:${ref.name}`, ref.constraints);
+    listeners.push({ type: "collectionGroup", name: ref.name, constraints: ref.constraints, cb: onNext });
+    setTimeout(() => onNext(groupSnapFor(ref.name, ref.constraints)), 0);
+    return () => {};
+  }
+  count("onSnapshot", ref.path, ref.constraints);
   if (ref.kind === "doc") {
     listeners.push({ type: "doc", path: ref.path, id: ref.id, cb: onNext });
     setTimeout(() => onNext(docSnapFor(ref.path, ref.id)), 0);
   } else {
-    listeners.push({ type: "collection", path: ref.path, cb: onNext });
-    setTimeout(() => onNext(snapFor(ref.path)), 0);
+    listeners.push({ type: "collection", path: ref.path, constraints: ref.constraints, cb: onNext });
+    setTimeout(() => onNext(snapFor(ref.path, ref.constraints)), 0);
   }
   return () => {};
 };

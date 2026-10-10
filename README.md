@@ -580,6 +580,36 @@ what you save is always a new, separate item on the shelf, never a change to
 the one you copied. Leave it on **— start blank —**, the default, and the
 sheet behaves exactly as it always has.
 
+### Finding things on the shelf
+
+Once there's anything on the shelf, a **Search the shelf** box sits above it.
+It looks at everything a row shows — name, brand, category, part and model
+numbers, size, vendor, notes — so "PH7317", "fram" and "filter" all find the
+same oil filter. Give things more than one category and a chip per category
+appears under it; tap one to show just that category, tap it again (or
+**All**) to show everything.
+
+### Keeping the shelf quick
+
+The parts pages read only what they show, so they stay quick (and inside the
+free Firebase allowance) as the history grows:
+
+- What's set aside for jobs comes from **scheduled** jobs only, not every
+  service ever logged. That takes one setting in your Firebase project — see
+  below. Until it's there, the shelf reads every service instead, exactly as
+  it used to, so nothing breaks; it's just slower with a long history.
+- The history line on each row, and the **Purchases** page, read the last 90
+  days of the log. **Show older purchases**, at the bottom of that page,
+  brings in the rest.
+- A part's own history reads that part's entries, not the whole log.
+
+**The one-time Firebase setting.** In the Firebase console, open
+**Firestore Database → Indexes → Single field**, choose **Add exemption**,
+and enter collection ID `services` and field path `status`. Under
+**Collection group** scope, turn on **Ascending**, then save. It takes a few
+minutes to build. (Opening the Parts page before it exists also logs a
+message in the browser console with a link that sets up the same thing.)
+
 ### Purchases
 
 The 🧾 button on any shelf row is **Log a purchase** — how many, what it cost

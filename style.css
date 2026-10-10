@@ -1429,3 +1429,11 @@ input[type="file"] {
     font-size: max(16px, 1em);
   }
 }
+
+/* Under a list that only shows the recent stretch, asking for the rest. */
+.show-older { margin-top: 12px; }
+
+/* Search and category chips above the parts shelf. */
+.shelf-tools { margin-bottom: 12px; }
+.shelf-tools[hidden] { display: none; }
+.shelf-tools input[type="search"] { margin-bottom: 8px; }
