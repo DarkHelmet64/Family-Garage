@@ -782,3 +782,94 @@ export function upcomingWork(vehicles, { today = new Date() } = {}) {
   return { overdue, soon };
 }
 
+
+// ---------------------------------------------------------------------------
+// Which job a part went on, for visits saved before that was recorded
+//
+// A visit covering several jobs records, per part, which job it went on
+// (`forJob`). Visits saved before that -- or with nobody picking -- don't,
+// and there's no getting the answer back for certain. This fills it in only
+// where the evidence points at exactly one of the visit's jobs:
+//   - `usualParts(vehicleId, job)`: the part ids a job usually takes on that
+//     vehicle (its schedule entry's parts, or the job name's saved kit)
+//   - every finished visit where the answer isn't in doubt: a single-job
+//     record, or a part that already says its job -- on the same vehicle
+//     first, then anywhere in the garage
+// A part none of the jobs claims, or more than one does, is left as it is
+// and reported, for someone to pick by hand.
+// ---------------------------------------------------------------------------
+
+export function inferPartJobs(records, usualParts = () => []) {
+  const jobsOf = (record) => serviceItems(record).map((item) => item.title).filter(Boolean);
+
+  // What history says: part ids seen on each job, by vehicle and garage-wide.
+  const seenOnVehicle = new Map();
+  const seenAnywhere = new Map();
+  const note = (vehicleId, job, partId) => {
+    const key = normalizeJob(job);
+    for (const [map, k] of [
+      [seenOnVehicle, `${vehicleId}|${key}`],
+      [seenAnywhere, key],
+    ]) {
+      if (!map.has(k)) map.set(k, new Set());
+      map.get(k).add(partId);
+    }
+  };
+  // A scheduled job's parts only count when they name their job: until
+  // recently, booking several jobs at once put every part on the first one.
+  for (const record of records) {
+    const jobs = jobsOf(record);
+    const used = record.status === "done" ? asArray(record.parts) : asArray(record.partsNeeded).filter((p) => p && p.forJob);
+    for (const part of used) {
+      if (!part || !part.partId) continue;
+      const job = part.forJob || (jobs.length === 1 ? jobs[0] : null);
+      if (job) note(record.vehicleId, job, part.partId);
+    }
+  }
+
+  // The jobs on a visit that claim a part, strongest evidence first: the
+  // vehicle's own kits and history settle it if they can, the garage's
+  // history only if they can't.
+  const claimants = (record, jobs, partId) => {
+    const tiers = [
+      (job) =>
+        asArray(usualParts(record.vehicleId, job)).includes(partId) ||
+        !!seenOnVehicle.get(`${record.vehicleId}|${normalizeJob(job)}`)?.has(partId),
+      (job) => !!seenAnywhere.get(normalizeJob(job))?.has(partId),
+    ];
+    for (const claims of tiers) {
+      const found = jobs.filter(claims);
+      if (found.length) return found;
+    }
+    return [];
+  };
+
+  const fixes = [];
+  const unclear = [];
+  for (const record of records) {
+    if (record.status !== "done") continue;
+    const jobs = jobsOf(record);
+    const parts = asArray(record.parts);
+    if (jobs.length < 2 || !parts.some((used) => used && used.partId && !used.forJob)) continue;
+
+    let filled = 0;
+    const stillOpen = [];
+    const updated = parts.map((used) => {
+      if (!used || !used.partId || used.forJob) return used;
+      const found = claimants(record, jobs, used.partId);
+      if (found.length === 1) {
+        filled += 1;
+        return { ...used, forJob: found[0] };
+      }
+      stillOpen.push(used.name || "Part");
+      return used;
+    });
+    if (filled) fixes.push({ vehicleId: record.vehicleId, id: record.id, parts: updated, filled });
+    if (stillOpen.length) {
+      unclear.push({ vehicleId: record.vehicleId, id: record.id, title: record.title, servicedOn: record.servicedOn, parts: stillOpen });
+    }
+  }
+  return { fixes, unclear };
+}
+
+const asArray = (value) => (Array.isArray(value) ? value : []);

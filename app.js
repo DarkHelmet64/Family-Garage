@@ -72,6 +72,7 @@ import {
   serviceNameReport,
   serviceNameSuggestions,
   defaultPartsFor,
+  inferPartJobs,
   STATS_VERSION,
 } from "./stats.js";
 
@@ -328,14 +329,130 @@ function openGarageMenu() {
       { value: "new", label: "+ Add a vehicle" },
       { value: "names", label: "🏷️ Service names" },
       { value: "export", label: "⬇️ Export data" },
+      { value: "repair-jobs", label: "🔧 Fill in which job parts went on" },
       { value: "qr", label: "Show QR code" },
     ],
   }).then((choice) => {
     if (choice === "new") location.search = "?new";
     else if (choice === "names") location.search = "?names";
     else if (choice === "export") exportAllData().catch(reportActionFailure);
+    else if (choice === "repair-jobs") repairPartJobs().catch(reportActionFailure);
     else if (choice === "qr") openQrModal(siteUrl(), "Scan to open Family Garage");
   });
+}
+
+// ---------------------------------------------------------------------------
+// Filling in which job parts went on, for visits saved before that was
+// recorded. A one-off someone starts from the More menu, never something
+// that runs by itself: it says what it found and asks before writing, only
+// fills in what the evidence settles (see inferPartJobs), and lists the rest
+// for picking by hand. The stock log's job entries for those visits are
+// renamed to match. Nothing about any count moves.
+// ---------------------------------------------------------------------------
+
+async function repairPartJobs() {
+  const [vehicleSnap, servicesSnap, scheduleSnap, namesSnap, logSnap] = await Promise.all([
+    getDocs(collection(db, "vehicles")),
+    getDocs(collectionGroup(db, "services")),
+    getDocs(collectionGroup(db, "schedule")),
+    getDocs(collection(db, "serviceNames")).catch(() => ({ docs: [] })),
+    getDocs(query(collection(db, "purchases"), where("kind", "==", "job"))).catch(() => ({ docs: [] })),
+  ]);
+  const vehicleIdOf = (docSnap) => docSnap.ref.path.split("/")[1];
+  const vehicleName = (id) => vehicleSnap.docs.find((d) => d.id === id)?.data().name || "A vehicle since removed";
+  const records = servicesSnap.docs.map((d) => ({ id: d.id, vehicleId: vehicleIdOf(d), ...d.data() }));
+  const schedule = scheduleSnap.docs.map((d) => ({ vehicleId: vehicleIdOf(d), ...d.data() }));
+  const names = namesSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+
+  // The same precedence the sheets use: a vehicle's own schedule entry's
+  // parts, or else the job name's saved kit.
+  const usualParts = (vehicleId, job) => {
+    const own = schedule.find((entry) => entry.vehicleId === vehicleId && normalizeJob(entry.title) === normalizeJob(job));
+    const kit = asList(own?.partsNeeded).length ? own.partsNeeded : defaultPartsFor(names, job, vehicleId) || [];
+    return asList(kit)
+      .map((used) => used && used.partId)
+      .filter(Boolean);
+  };
+  const { fixes, unclear } = inferPartJobs(records, usualParts);
+
+  // Job entries in the stock log written for these visits, renamed to the
+  // part's own job -- matched by vehicle, date and part, and only where that
+  // points at exactly one visit and one job.
+  const repaired = new Map(fixes.map((fix) => [`${fix.vehicleId}/${fix.id}`, fix.parts]));
+  const logFixes = [];
+  for (const entrySnap of logSnap.docs) {
+    const entry = entrySnap.data();
+    const visits = records.filter(
+      (record) =>
+        record.status === "done" &&
+        record.vehicleId === entry.vehicleId &&
+        record.servicedOn === entry.purchasedOn &&
+        serviceItems(record).filter((item) => item.title).length > 1
+    );
+    if (visits.length !== 1) continue;
+    const parts = repaired.get(`${visits[0].vehicleId}/${visits[0].id}`) || asList(visits[0].parts);
+    const jobs = [...new Set(parts.filter((used) => used && used.partId === entry.partId && used.forJob).map((used) => used.forJob))];
+    if (jobs.length === 1 && jobs[0] !== entry.serviceTitle) logFixes.push({ id: entrySnap.id, serviceTitle: jobs[0] });
+  }
+
+  const filled = fixes.reduce((sum, fix) => sum + fix.filled, 0);
+  const leftOver = unclear.reduce((sum, visit) => sum + visit.parts.length, 0);
+  const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
+  if (!filled && !logFixes.length) {
+    return showPartJobRepairResult(
+      leftOver
+        ? `Nothing could be filled in for certain. ${plural(leftOver, "part")} on ${plural(unclear.length, "visit")} still need a job picked by hand:`
+        : "Every part on a visit with more than one job already says which job it went on. Nothing to fill in.",
+      unclear,
+      vehicleName
+    );
+  }
+
+  const confirmed = await openConfirmModal({
+    title: "Fill in which job parts went on?",
+    message:
+      `${plural(filled, "part")} on ${plural(fixes.length, "visit")} can be matched to their job from each job's usual parts and your other visits.` +
+      (leftOver ? ` ${plural(leftOver, "part")} on ${plural(unclear.length, "visit")} aren't clear and will be left for you to pick.` : "") +
+      " Nothing on the shelf changes.",
+    confirmLabel: "Fill them in",
+  });
+  if (!confirmed) return;
+
+  for (const fix of fixes) {
+    await updateDoc(doc(db, "vehicles", fix.vehicleId, "services", fix.id), { parts: fix.parts });
+  }
+  for (const fix of logFixes) {
+    await updateDoc(doc(db, "purchases", fix.id), { serviceTitle: fix.serviceTitle }).catch((err) =>
+      console.warn("Couldn't rename a stock-log entry", fix.id, err)
+    );
+  }
+  showPartJobRepairResult(
+    `Filled in ${plural(filled, "part")} on ${plural(fixes.length, "visit")}.` +
+      (leftOver ? ` These still need a job picked by hand — open the visit and choose one under Parts used:` : ""),
+    unclear,
+    vehicleName
+  );
+}
+
+function showPartJobRepairResult(message, unclear, vehicleName) {
+  const rows = unclear
+    .map(
+      (visit) => `
+      <div class="row">
+        <div class="row-main">
+          <span class="row-title-text">${escapeHtml(`${vehicleName(visit.vehicleId)} · ${visit.title || "Service"}`)}</span>
+          <span class="row-meta">${escapeHtml([formatISO(visit.servicedOn), visit.parts.join(", ")].filter(Boolean).join(" · "))}</span>
+        </div>
+      </div>`
+    )
+    .join("");
+  const overlay = buildModal(`
+    <h2>Which job parts went on</h2>
+    <p class="hint">${escapeHtml(message)}</p>
+    ${rows ? `<div class="list">${rows}</div>` : ""}
+    <div class="modal-actions"><button id="repair-done">OK</button></div>
+  `);
+  overlay.querySelector("#repair-done").addEventListener("click", () => overlay.remove());
 }
 
 // ---------------------------------------------------------------------------
