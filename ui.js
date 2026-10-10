@@ -433,7 +433,9 @@ function renderField(field) {
 // change what a saved record says was used.
 function partOptionsHtml(catalogue, selectedId, vehicleId) {
   const optionHtml = (part) =>
-    `<option value="${escapeHtml(part.id)}" ${part.id === selectedId ? "selected" : ""}>${escapeHtml(part.name)} (${escapeHtml(String(part.quantity ?? 0))} ${escapeHtml(part.unit || "each")})</option>`;
+    // What's free to book: anything already set aside for other jobs is off
+    // this figure, which is why it can read lower than the shelf page.
+    `<option value="${escapeHtml(part.id)}" ${part.id === selectedId ? "selected" : ""}>${escapeHtml(part.name)} (${escapeHtml(String(Math.round((Number(part.quantity) || 0) * 100) / 100))} ${escapeHtml(part.unit || "each")} free)</option>`;
 
   const fits = (part) => !(part.fitsVehicleIds || []).length || part.fitsVehicleIds.includes(vehicleId);
   // Tools aren't used up, so there's nothing to book off the shelf for a job.

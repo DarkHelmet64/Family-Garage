@@ -27,7 +27,7 @@ await page.waitForSelector(".modal");
 await page.fill('[data-list-rows="titles"] [data-item-title]', "Belt replacement");
 await page.fill("#field-dueOn", "2030-01-01");
 await page.click("[data-parts-add]");
-await page.selectOption("[data-part-id]", { label: `0W-20 oil (${baseline} qt)` });
+await page.selectOption("[data-part-id]", { label: `0W-20 oil (${baseline} qt free)` });
 await page.fill("[data-part-qty]", "3");
 await page.dispatchEvent("[data-part-qty]", "change");
 await page.click('.modal button:text-is("Schedule it")');
