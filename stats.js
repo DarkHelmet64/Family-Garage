@@ -26,7 +26,10 @@ export function sortFillupsAscending(fillups) {
 // Bump it whenever a change here would give an existing log a different answer.
 //   1 - the original gallons-weighted average
 //   2 - outliers left out of the average, best and worst
-export const STATS_VERSION = 2;
+//   3 - also carries how far it's driven a day and when each job was last
+//       done, so the garage's look-ahead needn't read every fill-up and
+//       finished service to work them out
+export const STATS_VERSION = 3;
 
 // ---------------------------------------------------------------------------
 // Outliers
@@ -489,6 +492,25 @@ export function lastDoneFor(title, services) {
   })[matches.length - 1];
 }
 
+// When each job was last done, by normalized name -- what lastDoneFor would
+// say for each, worked out once from the whole history and kept on the
+// vehicle's summary, so the garage's look-ahead can read it instead of every
+// finished service.
+export function lastDoneByJob(services) {
+  const byJob = {};
+  for (const job of completedJobs(services || [])) {
+    const key = normalizeJob(job.title);
+    const current = byJob[key];
+    const later =
+      !current ||
+      (job.odometerMiles !== null && current.odometerMiles !== null && job.odometerMiles !== current.odometerMiles
+        ? job.odometerMiles > current.odometerMiles
+        : String(job.servicedOn || "") >= String(current.servicedOn || ""));
+    if (later) byJob[key] = { title: job.title, servicedOn: job.servicedOn, odometerMiles: job.odometerMiles };
+  }
+  return byJob;
+}
+
 // What stands in for a job that has never been logged: the vehicle as it left
 // the factory -- zero miles, on January 1st of its model year. Every interval
 // then has something to count from, so a job never logged on a 2016 car reads
@@ -522,9 +544,16 @@ export function nextDueFor(entry, lastDone, { vehicleYear = null } = {}) {
 
 // The whole page in one call: each entry with when it was last done, when it's
 // next needed, and how urgent that is -- most pressing first.
-export function scheduleRows(schedule, services, { odometerMiles = null, today = new Date(), vehicleYear = null } = {}) {
+//
+// `lastDone`, when given, is a lastDoneByJob map standing in for the full
+// history -- what the garage's look-ahead has, from each vehicle's summary.
+export function scheduleRows(
+  schedule,
+  services,
+  { odometerMiles = null, today = new Date(), vehicleYear = null, lastDone: lastDoneMap = null } = {}
+) {
   const rows = schedule.map((entry) => {
-    const lastDone = lastDoneFor(entry.title, services);
+    const lastDone = lastDoneMap ? lastDoneMap[normalizeJob(entry.title)] || null : lastDoneFor(entry.title, services);
     const due = nextDueFor(entry, lastDone, { vehicleYear });
     // Nothing logged *and* no model year to fall back on is the only case left
     // that can't say when a job is next needed.
@@ -693,7 +722,9 @@ export function upcomingWork(vehicles, { today = new Date() } = {}) {
   for (const vehicle of vehicles) {
     const services = vehicle.services || [];
     const odometerMiles = vehicle.odometerMiles ?? null;
-    const rate = milesPerDay(vehicle.fillups || []);
+    // A vehicle loaded from its summary carries these worked out already; one
+    // loaded with its whole history works them out here.
+    const rate = vehicle.milesPerDay !== undefined ? vehicle.milesPerDay : milesPerDay(vehicle.fillups || []);
 
     const rows = [];
 
@@ -718,6 +749,7 @@ export function upcomingWork(vehicles, { today = new Date() } = {}) {
       odometerMiles,
       today,
       vehicleYear: vehicle.year ?? null,
+      lastDone: vehicle.lastDoneByJob || null,
     })) {
       if (booked.has(normalizeJob(entry.title))) continue;
       rows.push({

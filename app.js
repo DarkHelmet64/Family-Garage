@@ -73,6 +73,8 @@ import {
   serviceNameSuggestions,
   defaultPartsFor,
   inferPartJobs,
+  lastDoneByJob,
+  milesPerDay,
   STATS_VERSION,
 } from "./stats.js";
 
@@ -1002,7 +1004,7 @@ function mountComingUp(vehiclesPromise) {
     }
   });
 
-  loadGarage(vehiclesPromise)
+  loadGarage(vehiclesPromise, { lean: true })
     .then(async (loaded) => {
       Object.assign(state, loaded, { loaded: true });
       // Catches up anything booked before parts started reserving at
@@ -1080,7 +1082,20 @@ async function migratePartsReservations(vehicles) {
 // (re)published, which was never going to discriminate between two vehicles
 // reading the same collection anyway. The three collection-group reads are
 // still independent of each other: one failing still leaves the other two.
-async function loadGarage(vehiclesPromise = null) {
+//
+// `lean` (the garage screen's own look-ahead) reads much less once every
+// vehicle's summary is current: each one already carries its odometer, how
+// far it's driven a day and when each job was last done, so all that's left
+// to read is the jobs still booked and the schedules. A vehicle whose summary
+// is older than this version of the app -- refreshed on this same visit by
+// refreshStaleSummaries -- makes this visit read everything, as it always did.
+async function loadGarage(vehiclesPromise = null, { lean = false } = {}) {
+  if (lean) {
+    const vehicleDocs = await (vehiclesPromise ||
+      getDocs(collection(db, "vehicles")).then((snap) => snap.docs.map((d) => ({ id: d.id, ...d.data() }))));
+    if (vehicleDocs.every((vehicle) => vehicle.statsVersion === STATS_VERSION)) return loadGarageFromSummaries(vehicleDocs);
+    vehiclesPromise = Promise.resolve(vehicleDocs);
+  }
   const [vehicleDocs, partSnap, servicesSnap, scheduleSnap, fillupsSnap] = await Promise.all([
     vehiclesPromise ||
       getDocs(collection(db, "vehicles")).then((snap) => snap.docs.map((d) => ({ id: d.id, ...d.data() }))),
@@ -1146,6 +1161,65 @@ async function loadGarage(vehiclesPromise = null) {
     parts: partSnap.docs.map((d) => ({ id: d.id, ...d.data() })),
     serviceNames: nameSnap.docs.map((d) => ({ id: d.id, ...d.data() })),
   };
+}
+
+async function loadGarageFromSummaries(vehicleDocs) {
+  const [partSnap, booked, scheduleSnap, nameSnap] = await Promise.all([
+    getDocs(collection(db, "parts")),
+    getBookedServices().catch((err) => {
+      console.warn("Couldn't read services across the garage", err);
+      return [];
+    }),
+    getDocs(collectionGroup(db, "schedule")).catch((err) => {
+      console.warn("Couldn't read schedules across the garage", err);
+      return { docs: [] };
+    }),
+    getDocs(collection(db, "serviceNames")).catch((err) => {
+      console.warn("Couldn't read the service names list", err);
+      return { docs: [] };
+    }),
+  ]);
+  const group = (list) => {
+    const map = new Map();
+    for (const item of list) {
+      if (!map.has(item.vehicleId)) map.set(item.vehicleId, []);
+      map.get(item.vehicleId).push(item);
+    }
+    return map;
+  };
+  const bookedByVehicle = group(booked);
+  const scheduleByVehicle = group(scheduleSnap.docs.map((d) => ({ id: d.id, vehicleId: d.ref.path.split("/")[1], ...d.data() })));
+
+  return {
+    vehicles: vehicleDocs.map((data) => ({
+      id: data.id,
+      name: data.name,
+      year: data.year ?? null,
+      odometerMiles: data.odometerMiles ?? null,
+      milesPerDay: data.milesPerDay ?? null,
+      lastDoneByJob: data.lastDoneByJob || {},
+      services: bookedByVehicle.get(data.id) || [],
+      schedule: scheduleByVehicle.get(data.id) || [],
+      fillups: [],
+    })),
+    parts: partSnap.docs.map((d) => ({ id: d.id, ...d.data() })),
+    serviceNames: nameSnap.docs.map((d) => ({ id: d.id, ...d.data() })),
+  };
+}
+
+// Every job still booked, across the garage, each with its vehicle's id. The
+// same collection-group index the Parts page uses; without it, every service
+// is read and the finished ones dropped, which is what this always did.
+async function getBookedServices() {
+  const withVehicle = (snap) =>
+    snap.docs.map((d) => ({ id: d.id, vehicleId: d.ref.path.split("/")[1], ...d.data() })).filter((s) => s.status !== "done");
+  try {
+    return withVehicle(await getDocs(query(collectionGroup(db, "services"), where("status", "==", "scheduled"))));
+  } catch (err) {
+    if (err?.code !== "failed-precondition") throw err;
+    console.info("No collection-group index on services.status yet -- reading every service instead.", err.message);
+    return withVehicle(await getDocs(collectionGroup(db, "services")));
+  }
 }
 
 function renderComingUp(state) {
@@ -4684,6 +4758,11 @@ async function recomputeSummary(id) {
 
   await updateDoc(doc(db, "vehicles", id), {
     odometerMiles,
+    // What the garage's look-ahead needs from the whole history, worked out
+    // here -- where that history is being read anyway -- rather than by
+    // reading every fill-up and finished service on each garage visit.
+    milesPerDay: milesPerDay(fillups),
+    lastDoneByJob: lastDoneByJob(services),
     avgMpg: summary.avgMpg,
     lastMpg: summary.lastMpg,
     statsVersion: STATS_VERSION,

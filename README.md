@@ -819,6 +819,15 @@ whichever falls first. To decide it, a job due on mileage is still turned into a
 date using how fast that vehicle has actually been driven; only miles still to
 drive can be dated that way, so a job you're already past is simply overdue.
 
+It stays quick as your history grows. Each vehicle keeps a small summary — its
+odometer, how far it's driven a day, and when each job was last done — updated
+whenever you log a fill-up or a service, so Coming up reads only the jobs still
+booked and the schedules, not every fill-up and finished service you've ever
+logged. (The first visit after an update that changes what the summary holds
+reads everything once, to refresh it.) The booked-jobs read uses the same
+Firebase index setting as the [Parts page](#keeping-the-shelf-quick); without
+it, Coming up still works, it just reads every service to find the booked ones.
+
 Below the vehicle-by-vehicle list is **🛒 To buy** — a straight read of the shelf:
 everything at or below the level you said to keep, whatever it took to get
 there, with the count in the header. Each line says which one to buy and where:
