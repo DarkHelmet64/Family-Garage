@@ -1825,6 +1825,19 @@ function physicalQuantity(part, state) {
   return (Number(part.quantity) || 0) + ((state.reserved && state.reserved.get(part.id)) || 0);
 }
 
+// Which job a part on a service went on. A visit covering several jobs
+// records that per part; without it (older records, or a part nobody picked a
+// job for) a single-job record is still unambiguous, and a visit is named by
+// all of its jobs rather than by whichever happens to be first.
+function jobForPart(service, used) {
+  if (used && used.forJob) return used.forJob;
+  const jobs = serviceItems(service)
+    .map((item) => item.title)
+    .filter(Boolean);
+  if (jobs.length > 1) return jobs.join(", ");
+  return jobs[0] || service.title || "Service";
+}
+
 // How a log entry reads, in a few words.
 function stockEntryLabel(entry) {
   switch (entry.kind) {
@@ -1943,7 +1956,7 @@ async function openPartHistory(part, state) {
     return `
       <div class="row">
         <div class="row-main">
-          <span class="row-title-text">${escapeHtml(service.title || "Service")}</span>
+          <span class="row-title-text">${escapeHtml(jobForPart(service, used))}</span>
           <span class="row-meta">${escapeHtml(vehicleName(service.vehicleId))}${when ? ` · ${escapeHtml(formatISO(when))}` : ""} · ${
             done ? "used" : "reserved"
           }</span>
@@ -3364,9 +3377,11 @@ async function openScheduleServiceForm(state, existing, odometerMiles) {
         value: existing?.partsNeeded || [],
         catalogue: state.parts || [],
         vehicleId: state.id,
+        // Several jobs booked at once: each part says which one it's for.
+        appliesTo: existing ? undefined : "titles",
         hint: existing
           ? "Taken off the shelf as soon as you save this — put it back by clearing the part here or deleting the job."
-          : "Taken off the shelf as soon as you save this. Adding more than one job above? This applies to the first one listed.",
+          : "Taken off the shelf as soon as you save this. Adding more than one job above? Pick which job each part is for.",
       },
       { name: "notes", label: "Notes (optional)", type: "textarea", value: existing?.notes || "" },
     ],
@@ -3411,12 +3426,20 @@ async function openScheduleServiceForm(state, existing, odometerMiles) {
     showToast("Service updated");
   } else {
     const titles = (values.titles || []).map((item) => item.title).filter(Boolean);
+    // Each job gets the parts picked for it; a part with no job picked goes
+    // on the first one, as everything used to.
+    const needed = values.partsNeeded || [];
+    const partsFor = (title, index) =>
+      needed.filter((part) => {
+        const match = titles.findIndex((t) => part.forJob && normalizeJob(t) === normalizeJob(part.forJob));
+        return match === -1 ? index === 0 : match === index;
+      });
     await Promise.all(
       titles.map((title, index) =>
         addDoc(collection(db, "vehicles", state.id, "services"), {
           ...shared,
           title,
-          partsNeeded: index === 0 ? values.partsNeeded || [] : [],
+          partsNeeded: partsFor(title, index),
           reserved: true,
           servicedOn: null,
           odometerMiles: null,
@@ -3428,7 +3451,10 @@ async function openScheduleServiceForm(state, existing, odometerMiles) {
         })
       )
     );
-    await applyPartUsage([], values.partsNeeded || [], { vehicleId: state.id, title: titles[0] });
+    for (const [index, title] of titles.entries()) {
+      const parts = partsFor(title, index);
+      if (parts.length) await applyPartUsage([], parts, { vehicleId: state.id, title });
+    }
     showToast(titles.length > 1 ? `${titles.length} services scheduled` : "Service scheduled");
   }
   await recomputeSummary(state.id);
@@ -3751,14 +3777,21 @@ function sharedShop(records) {
 // What the whole visit needs off the shelf: every job's own reservation,
 // added up, so two oil changes on one trip ask for both lots of oil rather
 // than one.
+//
+// Each part stays on the job it was booked for: the same part needed by two
+// jobs is two rows, one per job, so the visit can say which job it went on
+// rather than lumping it all onto whichever job is listed first.
 function partsNeededAcross(records) {
   const merged = new Map();
   for (const record of records) {
+    const job = record.title || serviceItems(record).find((item) => item.title)?.title || null;
     for (const need of record.partsNeeded || []) {
       if (!need.partId) continue;
-      const current = merged.get(need.partId) || { ...need, quantity: 0 };
+      const forJob = need.forJob || job;
+      const key = `${need.partId}|${normalizeJob(forJob)}`;
+      const current = merged.get(key) || { ...need, forJob, quantity: 0 };
       current.quantity += Number(need.quantity) || 0;
-      merged.set(need.partId, current);
+      merged.set(key, current);
     }
   }
   return [...merged.values()];
@@ -4197,7 +4230,16 @@ async function bookPlanEntry(state, id) {
 async function applyPartUsage(before, after, job = {}) {
   const deltas = new Map();
   const names = new Map();
+  // The job each part went on, where the rows say: the newer rows first, so
+  // a part moved to another job is logged under the one it's on now.
+  const jobs = new Map();
   for (const used of [...before, ...after]) if (used.partId && used.name) names.set(used.partId, used.name);
+  for (const used of [...after, ...before]) {
+    if (!used.partId || !used.forJob) continue;
+    const list = jobs.get(used.partId) || [];
+    if (!list.includes(used.forJob)) list.push(used.forJob);
+    jobs.set(used.partId, list);
+  }
   for (const used of before) deltas.set(used.partId, (deltas.get(used.partId) || 0) + Number(used.quantity || 0));
   for (const used of after) deltas.set(used.partId, (deltas.get(used.partId) || 0) - Number(used.quantity || 0));
 
@@ -4220,7 +4262,7 @@ async function applyPartUsage(before, after, job = {}) {
         change: delta,
         on: job.on,
         vehicleId: job.vehicleId || null,
-        serviceTitle: job.title || null,
+        serviceTitle: (jobs.get(partId) || []).join(", ") || job.title || null,
         unit: [...before, ...after].find((used) => used.partId === partId)?.unit || "each",
       }
     ).catch((err) => console.warn("Couldn't log a job's parts", partId, err));
