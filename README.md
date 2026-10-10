@@ -659,19 +659,27 @@ Booking out more than you had leaves a negative count. That's kept rather than
 quietly clamped — it means the count was wrong, and the row says so — and
 **Recount** puts it right, with the correction logged.
 
-### Buying in one unit, using in another
+### Counted, measured and reusable
 
-Some things are bought bigger than they're used — a jug of coolant counted in
-**gal** but dispensed by the **oz**, a case counted in **qt** but topped off a
-few ounces at a time. Give a part a **used in** unit on the shelf page and say
-how many of it make one you're counted in (128 oz to a gal, say), and every
-parts picker switches that row's quantity box to the smaller unit — type "12"
-for 12 oz and the shelf still comes down by the right fraction of a gallon.
-The warning under a row that's asking for more than there is speaks in that
-same smaller unit, too.
+Each item is one of three kinds, picked at the top of its sheet, and the
+sheet only asks what that kind needs:
 
-Leave **used in** blank — the default — and a part works exactly as it always
-has: bought and used in the one unit, nothing to convert.
+- **Counted** — filters, bulbs, wiper blades: whole items, counted in **each**
+  (or box, set, pair…).
+- **Measured** — oil, coolant, fluids: bought in a container and used by the
+  amount. Say it **comes in** a jug, **measured in** qt, with **5** qt in one,
+  and the shelf reads **2 jugs · 10 qt**. Buy it by the jug; **Use** it, or book
+  it onto a job, by the quart — the shelf comes down by the right fraction of a
+  jug (3 qt leaves **1.4 jugs · 7 qt**). Leave **measured in** blank to count it
+  in the one unit it comes in.
+- **Reusable** — a torque wrench, jack stands: never used up, so it has no
+  count and is never "running low". **Use** logs where it was used, and
+  logging a purchase records what it cost without counting it. It isn't
+  offered in a job's parts picker, since there's nothing to take off the
+  shelf.
+
+A part saved before kinds existed keeps behaving exactly as it did: measured
+if it was given a smaller unit to use it in, counted otherwise.
 
 ### What the parts cost, on the record
 

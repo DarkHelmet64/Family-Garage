@@ -590,6 +590,9 @@ button:disabled { opacity: 0.5; cursor: default; }
 
 .field { grid-column: span 2; display: flex; flex-direction: column; min-width: 0; }
 .field-half { grid-column: span 1; }
+/* A sheet can hide fields that don't apply -- a tool has no count -- and the
+   display above would otherwise override the hidden attribute. */
+.field[hidden], .field-hint[hidden] { display: none; }
 
 label {
   display: block;

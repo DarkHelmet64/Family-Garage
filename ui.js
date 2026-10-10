@@ -222,6 +222,10 @@ export function openFormModal({ title, hint, fields, submitLabel = "Save", valid
       const fire = () => field.onChange(input.value, overlay, listState);
       input.addEventListener("change", fire);
       input.addEventListener("input", fire);
+      // For a field whose value shapes the rest of the sheet -- a part's kind
+      // deciding which fields apply -- from the moment it opens, not only
+      // once it's changed.
+      if (field.fireOnOpen) fire();
     }
 
     const readValues = () => {
@@ -432,7 +436,9 @@ function partOptionsHtml(catalogue, selectedId, vehicleId) {
     `<option value="${escapeHtml(part.id)}" ${part.id === selectedId ? "selected" : ""}>${escapeHtml(part.name)} (${escapeHtml(String(part.quantity ?? 0))} ${escapeHtml(part.unit || "each")})</option>`;
 
   const fits = (part) => !(part.fitsVehicleIds || []).length || part.fitsVehicleIds.includes(vehicleId);
-  const offered = vehicleId ? catalogue.filter((part) => fits(part) || part.id === selectedId) : catalogue;
+  // Tools aren't used up, so there's nothing to book off the shelf for a job.
+  const stocked = catalogue.filter((part) => part.kind !== "tool" || part.id === selectedId);
+  const offered = vehicleId ? stocked.filter((part) => fits(part) || part.id === selectedId) : stocked;
 
   // An empty list is a dead end otherwise -- nothing to pick and no reason why.
   const placeholder = offered.length

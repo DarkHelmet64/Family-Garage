@@ -60,6 +60,7 @@ import {
   normalizeJob,
   lastDoneFor,
   isLowStock,
+  partKind,
   upcomingWork,
   shelfShortages,
   shortageVendors,
@@ -1197,7 +1198,17 @@ function planRowHtml(row) {
 // each other's arithmetic.
 // ---------------------------------------------------------------------------
 
-const PART_UNITS = ["each", "qt", "gal", "L", "oz", "box", "set", "pair", "ft"];
+const PART_UNITS = ["each", "qt", "gal", "L", "oz", "box", "set", "pair", "ft", "jug", "bottle", "can", "tube", "bag", "case"];
+// What a measured item's amount is given in, as opposed to what it comes in.
+const MEASURE_UNITS = ["qt", "gal", "L", "oz", "ml", "lb", "ft"];
+
+// "2 jugs", "1 jug", "4 qt": a container or a pack reads in the plural, a
+// measure or "each" never does.
+const PLURAL_UNITS = { jug: "jugs", bottle: "bottles", can: "cans", tube: "tubes", bag: "bags", case: "cases", box: "boxes", set: "sets", pair: "pairs" };
+function unitText(quantity, unit) {
+  const name = unit || "each";
+  return Math.abs(quantity) === 1 || !PLURAL_UNITS[name] ? name : PLURAL_UNITS[name];
+}
 
 const PART_CATEGORIES = [
   "Filters",
@@ -1347,10 +1358,14 @@ function drawParts(listEl, state) {
     (groups.has("") ? `<div class="section-title">Uncategorised</div>${list(groups.get(""))}` : "");
 }
 
-function formatQuantity(part) {
-  const quantity = Number(part.quantity) || 0;
-  const rounded = Math.round(quantity * 100) / 100;
-  return `${rounded} ${part.unit || "each"}`;
+// `quantity` defaults to the part's own count. A measured item with a size
+// given reads in both: "2.4 jugs · 12 qt".
+function formatQuantity(part, quantity = Number(part.quantity) || 0) {
+  if (partKind(part) === "tool") return "Reusable";
+  const rounded = roundQty(quantity);
+  const base = `${rounded} ${unitText(rounded, part.unit)}`;
+  const { unit: useIn, perBuyUnit } = usageUnit(part);
+  return perBuyUnit !== 1 ? `${base} · ${roundQty(quantity * perBuyUnit)} ${useIn}` : base;
 }
 
 // `quantity` -- what formatQuantity shows -- is already net of anything
@@ -1494,10 +1509,13 @@ async function moveStock(part, change, entry) {
 // Purchases
 // ---------------------------------------------------------------------------
 
+// A tool isn't counted, so buying one is logged for what it cost without
+// moving any count.
 async function recordPurchase(part, payload) {
   await logStock(part, {
     kind: "bought",
-    change: payload.quantity,
+    change: partKind(part) === "tool" ? 0 : payload.quantity,
+    quantity: payload.quantity,
     on: payload.purchasedOn,
     totalCents: payload.totalCents,
     unitCostCents: payload.totalCents && payload.quantity ? Math.round(payload.totalCents / payload.quantity) : null,
@@ -1510,7 +1528,9 @@ async function recordPurchase(part, payload) {
 // the shelf is still correctly stocked, just missing its record, rather than
 // a logged purchase that never actually landed on the shelf.
 async function logPartPurchase(part, payload) {
-  await updateDoc(doc(db, "parts", part.id), { quantity: increment(payload.quantity), updatedAt: serverTimestamp() });
+  if (partKind(part) !== "tool") {
+    await updateDoc(doc(db, "parts", part.id), { quantity: increment(payload.quantity), updatedAt: serverTimestamp() });
+  }
   await recordPurchase(part, payload);
 }
 
@@ -1522,7 +1542,7 @@ async function openPurchaseForm(part, state) {
       { name: "purchasedOn", label: "Date", type: "date", half: true, value: todayISO() },
       {
         name: "quantity",
-        label: `Quantity (${part.unit || "each"})`,
+        label: partKind(part) === "tool" ? "How many" : `How many (${unitText(2, part.unit)})`,
         type: "number",
         step: "0.01",
         min: 0,
@@ -1574,15 +1594,16 @@ async function openPurchaseForm(part, state) {
 // asked in whatever unit the part is used in; the shelf moves in the unit it's
 // counted in.
 async function openUseForm(part, state) {
+  const tool = partKind(part) === "tool";
   const { unit: useIn } = usageUnit(part);
   const onShelf = Math.round(toUsageUnits(part, physicalQuantity(part, state)) * 100) / 100;
   const vehicles = state.vehicles || [];
   const values = await openFormModal({
     title: `Use ${part.name}`,
-    hint: `${onShelf} ${useIn} on the shelf.`,
+    hint: tool ? "Logs where it was used. A tool isn't used up, so nothing comes off the shelf." : `${onShelf} ${useIn} on the shelf.`,
     fields: [
       { name: "usedOn", label: "Date", type: "date", half: true, value: todayISO() },
-      {
+      tool ? null : {
         name: "amount",
         label: `How much (${useIn})`,
         type: "number",
@@ -1604,16 +1625,16 @@ async function openUseForm(part, state) {
       { name: "notes", label: "Notes (optional)", type: "text", placeholder: "Topped off" },
     ].filter(Boolean),
     submitLabel: "Log it",
-    validate: (v) => (Number(v.amount) > 0 ? null : "How much did you use?"),
+    validate: (v) => (tool || Number(v.amount) > 0 ? null : "How much did you use?"),
   });
   if (!values) return;
 
-  const amount = Number(values.amount);
-  await moveStock(part, -toBuyUnits(part, amount), {
+  const amount = tool ? null : Number(values.amount);
+  await moveStock(part, tool ? 0 : -toBuyUnits(part, amount), {
     kind: "used",
     on: values.usedOn,
     amount,
-    amountUnit: useIn,
+    amountUnit: tool ? null : useIn,
     vehicleId: values.vehicleId || null,
     vehicleName: vehicles.find((v) => v.id === values.vehicleId)?.name || null,
     notes: values.notes || null,
@@ -1688,6 +1709,7 @@ function stockEntryLabel(entry) {
 }
 
 function stockChangeText(entry) {
+  if (entry.kind === "used" && entry.amount == null && !entry.change) return "";
   if (entry.kind === "used" && entry.amount != null) return `−${roundQty(entry.amount)} ${entry.amountUnit || entry.unit || "each"}`;
   const change = entry.change != null ? Number(entry.change) : Number(entry.quantity) || 0;
   return `${change < 0 ? "−" : "+"}${roundQty(Math.abs(change))} ${entry.unit || "each"}`;
@@ -1705,6 +1727,7 @@ function fillPartTemplate(overlay, part) {
     if (input) input.value = value;
   };
   set("name", part?.name || "");
+  set("kind", part ? partKind(part) : "count");
   set("brand", part?.brand || "");
   set("category", part?.category || "");
   set("partNumber", part?.partNumber || "");
@@ -1721,6 +1744,7 @@ function fillPartTemplate(overlay, part) {
   overlay.querySelectorAll('[data-check="fitsVehicleIds"]').forEach((box) => {
     box.checked = fits.has(box.value);
   });
+  applyPartKind(overlay);
 }
 
 // A part's own history: what's been bought (the purchase log) and where
@@ -1797,7 +1821,7 @@ async function openPartHistory(part, state) {
 
   const overlay = buildModal(`
     <h2>${escapeHtml(part.name)}</h2>
-    <p class="hint">${escapeHtml(formatQuantity(part))} on the shelf${part.vendor ? ` · from ${part.vendor}` : ""}${part.unitCostCents ? ` · ${escapeHtml(formatUSD(part.unitCostCents))} each` : ""}</p>
+    <p class="hint">${escapeHtml(partKind(part) === "tool" ? "Reusable" : `${formatQuantity(part)} on the shelf`)}${part.vendor ? ` · from ${part.vendor}` : ""}${part.unitCostCents ? ` · ${escapeHtml(formatUSD(part.unitCostCents))} each` : ""}</p>
     <div class="section-title">Bought${bought.length ? ` (${bought.length})` : ""}</div>
     ${bought.length ? `<div class="list">${bought.map(boughtRowHtml).join("")}</div>` : `<p class="empty small">Nothing logged yet.</p>`}
     ${
@@ -1812,6 +1836,58 @@ async function openPartHistory(part, state) {
     </div>
   `);
   overlay.querySelector("#history-close").addEventListener("click", () => overlay.remove());
+}
+
+// Shows the part sheet's fields for the kind picked, worded for it: a counted
+// item has a unit and a count; a measured one comes in a container holding
+// so much of something; a tool has neither. Hidden fields are ignored on save.
+// Called with no kind to re-word for a changed unit.
+function applyPartKind(overlay, kind = overlay.querySelector('[data-field="kind"]')?.value || "count") {
+  const value = (name) => overlay.querySelector(`[data-field="${name}"]`)?.value || "";
+  const fieldEl = (name) => overlay.querySelector(`[data-field="${name}"]`)?.closest(".field");
+  const show = (name, visible) => {
+    const el = fieldEl(name);
+    if (el) el.hidden = !visible;
+  };
+  const label = (name, text) => {
+    const el = fieldEl(name)?.querySelector("label");
+    if (el) el.textContent = text;
+  };
+  const hint = (name, text) => {
+    const el = fieldEl(name);
+    if (!el) return;
+    let hintEl = el.querySelector(".field-hint");
+    if (!hintEl) {
+      hintEl = document.createElement("span");
+      hintEl.className = "field-hint";
+      el.appendChild(hintEl);
+    }
+    hintEl.textContent = text;
+    hintEl.hidden = !text;
+  };
+
+  const tool = kind === "tool";
+  const measure = kind === "measure";
+  for (const name of ["unit", "quantity", "minQuantity"]) show(name, !tool);
+  show("useUnit", measure);
+  show("unitsPerBuyUnit", measure && !!value("useUnit"));
+
+  const unit = value("unit") || "each";
+  const units = unitText(2, unit);
+  if (measure) {
+    label("unit", "Comes in");
+    label("useUnit", "Measured in (optional)");
+    hint("useUnit", "Leave blank to count it by the " + unit + ".");
+    label("unitsPerBuyUnit", `How many ${value("useUnit") || "of it"} in one ${unit}`);
+    label("quantity", `On the shelf now (${units})`);
+    label("minQuantity", `Running low at (${units}, optional)`);
+    label("unitCost", `Cost per ${unit} (optional)`);
+  } else {
+    label("unit", "Counted in");
+    label("quantity", "On the shelf now");
+    label("minQuantity", "Running low at (optional)");
+    label("unitCost", tool ? "Cost (optional)" : "Cost each (optional)");
+  }
 }
 
 async function openPartForm(existing, state) {
@@ -1842,6 +1918,19 @@ async function openPartForm(existing, state) {
     fields: [
       copyFromField,
       { name: "name", label: "Part or supply", type: "text", value: existing?.name || "", placeholder: "Oil filter" },
+      {
+        name: "kind",
+        label: "What kind of thing is it?",
+        type: "select",
+        value: existing ? partKind(existing) : "count",
+        options: [
+          { value: "count", label: "Counted — filters, bulbs, blades" },
+          { value: "measure", label: "Measured — oil, coolant, fluids" },
+          { value: "tool", label: "Reusable — tools, jack stands" },
+        ],
+        fireOnOpen: true,
+        onChange: (kind, overlay) => applyPartKind(overlay, kind),
+      },
       {
         name: "brand",
         label: "Brand (optional)",
@@ -1903,6 +1992,7 @@ async function openPartForm(existing, state) {
         half: true,
         value: existing?.unit || "each",
         options: PART_UNITS.map((unit) => ({ value: unit, label: unit })),
+        onChange: (_unit, overlay) => applyPartKind(overlay),
       },
       // Only asked when adding: after that the count moves through Use,
       // purchases and Recount, each of which leaves a log entry, rather than
@@ -1925,20 +2015,20 @@ async function openPartForm(existing, state) {
         type: "select",
         half: true,
         value: existing?.useUnit || "",
-        options: [{ value: "", label: "Same as counted in" }, ...PART_UNITS.map((unit) => ({ value: unit, label: unit }))],
-        hint: "Pick this when it's dispensed smaller than it's bought -- oil by the quart out of a case, coolant by the ounce out of a jug.",
+        options: [{ value: "", label: "Same as it comes in" }, ...MEASURE_UNITS.map((unit) => ({ value: unit, label: unit }))],
+        onChange: (_unit, overlay) => applyPartKind(overlay),
       },
       {
         name: "unitsPerBuyUnit",
-        label: "Conversion (optional)",
+        label: "How much in one (optional)",
         type: "number",
         step: "0.01",
         inputmode: "decimal",
         min: 0,
         half: true,
         value: existing?.unitsPerBuyUnit != null ? String(existing.unitsPerBuyUnit) : "",
-        placeholder: "128",
-        hint: "How many of that unit make one you're counted in -- 128 oz to a gal, 4 qt to a gal.",
+        placeholder: "5",
+        onChange: (_size, overlay) => applyPartKind(overlay),
       },
       {
         name: "minQuantity",
@@ -1950,7 +2040,7 @@ async function openPartForm(existing, state) {
         half: true,
         value: existing?.minQuantity != null ? String(existing.minQuantity) : "",
         placeholder: "1",
-        hint: "Flags the item as running low once the shelf drops to this.",
+        hint: "Flags it as running low once the shelf drops to this.",
       },
       {
         name: "unitCost",
@@ -1974,21 +2064,26 @@ async function openPartForm(existing, state) {
       { name: "notes", label: "Notes (optional)", type: "text", value: existing?.notes || "", placeholder: "Bought two at a time" },
     ].filter(Boolean),
     submitLabel: existing ? "Save changes" : "Add it",
-    hint: existing
-      ? `${roundQty(physicalQuantity(existing, state))} ${existing.unit || "each"} on the shelf. To change the count, use Recount below.`
-      : null,
+    hint:
+      existing && partKind(existing) !== "tool"
+        ? `${formatQuantity(existing, physicalQuantity(existing, state))} on the shelf. To change the count, use Recount below.`
+        : null,
     secondaryAction: existing
       ? [
-          { label: "Recount what's on the shelf", onClick: () => openRecountForm(existing, state) },
+          partKind(existing) !== "tool"
+            ? { label: "Recount what's on the shelf", onClick: () => openRecountForm(existing, state) }
+            : null,
           { label: "View purchase & usage history", onClick: () => openPartHistory(existing, state) },
         ]
       : null,
     destructive: existing ? { label: "Remove from the parts list" } : null,
     validate: (v) => {
       if (!v.name) return "What is it called?";
+      if (v.kind === "tool") return null;
       if (v.quantity && !Number.isFinite(Number(v.quantity))) return "That quantity doesn't look like a number.";
-      if (v.useUnit && v.useUnit === v.unit) return "Pick a different unit than what it's counted in, or leave this blank.";
-      if (v.useUnit && !(Number(v.unitsPerBuyUnit) > 0)) return "Say how many of that unit make one you're counted in.";
+      if (v.kind !== "measure") return null;
+      if (v.useUnit && v.useUnit === v.unit) return "Pick a different unit than it comes in, or leave this blank.";
+      if (v.useUnit && !(Number(v.unitsPerBuyUnit) > 0)) return `Say how many ${v.useUnit} are in one ${v.unit}.`;
       return null;
     },
   });
@@ -2007,8 +2102,13 @@ async function openPartForm(existing, state) {
     return;
   }
 
+  // Only what the kind uses is kept: a counted item has no second unit, and a
+  // tool has no count, unit or low-stock floor at all.
+  const kind = values.kind || "count";
+  const measured = kind === "measure" && values.useUnit;
   const payload = {
     name: values.name,
+    kind,
     brand: values.brand || null,
     category: values.category || null,
     modelNumber: values.modelNumber || null,
@@ -2016,10 +2116,10 @@ async function openPartForm(existing, state) {
     vendor: values.vendor || null,
     fitsVehicleIds: values.fitsVehicleIds || [],
     partNumber: values.partNumber || null,
-    unit: values.unit || "each",
-    useUnit: values.useUnit || null,
-    unitsPerBuyUnit: values.useUnit ? Number(values.unitsPerBuyUnit) : null,
-    minQuantity: values.minQuantity ? Number(values.minQuantity) : null,
+    unit: kind === "tool" ? "each" : values.unit || "each",
+    useUnit: measured ? values.useUnit : null,
+    unitsPerBuyUnit: measured ? Number(values.unitsPerBuyUnit) : null,
+    minQuantity: kind !== "tool" && values.minQuantity ? Number(values.minQuantity) : null,
     unitCostCents: values.unitCost ? dollarsToCents(values.unitCost) : null,
     notes: values.notes || null,
     updatedAt: serverTimestamp(),
@@ -2028,7 +2128,7 @@ async function openPartForm(existing, state) {
   if (existing) {
     await updateDoc(doc(db, "parts", existing.id), payload);
   } else {
-    const quantity = values.quantity ? Number(values.quantity) : 0;
+    const quantity = kind !== "tool" && values.quantity ? Number(values.quantity) : 0;
     const ref = await addDoc(collection(db, "parts"), { ...payload, quantity, createdAt: serverTimestamp() });
     // What was already on hand is logged as a starting count, not a purchase:
     // it may have been bought years ago, and the purchase log is what was
@@ -2130,8 +2230,11 @@ async function confirmDeletePurchase(purchase) {
 }
 
 async function deletePurchase(purchase) {
+  // What the purchase actually added -- nothing, for a tool. An entry from
+  // before `change` existed added its whole quantity.
+  const added = purchase.change != null ? Number(purchase.change) : Number(purchase.quantity) || 0;
   try {
-    await updateDoc(doc(db, "parts", purchase.partId), { quantity: increment(-purchase.quantity), updatedAt: serverTimestamp() });
+    if (added) await updateDoc(doc(db, "parts", purchase.partId), { quantity: increment(-added), updatedAt: serverTimestamp() });
   } catch (err) {
     // The part itself may have been removed from the shelf since -- the log
     // entry still goes, there's just no shelf left to put it back onto.
